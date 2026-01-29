@@ -134,7 +134,7 @@ def get_embeddings():
         
         if not project_id:
             # Si no hay credenciales de servicio, intentar con API key
-            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
             if api_key:
                 return GoogleGenerativeAIEmbeddings(
                     model="text-embedding-004",
@@ -144,7 +144,7 @@ def get_embeddings():
                 st.error(
                     "❌ No se encontraron credenciales.\n\n"
                     "Opción 1: Coloca un archivo JSON de credenciales de servicio en el directorio.\n"
-                    "Opción 2: Configura GOOGLE_API_KEY o GEMINI_API_KEY en tu archivo .env"
+                    "Opción 2: Configura GOOGLE_API_KEY o VERTEX_AI_API_KEY en tu archivo .env"
                 )
                 return None
         
@@ -306,21 +306,21 @@ def procesar_pdf(ruta_archivo: str) -> List:
         return []
 
 
-def initialize_vector_store(documents: List, persist_directory: str = "/tmp/chroma_db", crear_nuevo: bool = False):
+def initialize_vector_store(documents: List, persist_directory: str = None, crear_nuevo: bool = False):
     """Inicializa o actualiza el vector store de Chroma procesando documentos en lotes.
     
     Args:
         documents: Lista de documentos a procesar
-        persist_directory: Directorio donde persistir la base de datos
+        persist_directory: No usado en modo in-memory (mantenido por compatibilidad)
         crear_nuevo: Si True, crea un nuevo vector store (limpia el anterior). Si False, agrega a uno existente.
+    
+    Nota: Usa ChromaDB en memoria debido a incompatibilidades de SQLite con WSL2.
+    Los datos se mantienen en st.session_state durante la sesión.
     """
     try:
         embeddings = get_embeddings()
         if not embeddings:
             return None
-        
-        # Crear directorio si no existe con permisos explícitos
-        Path(persist_directory).mkdir(parents=True, exist_ok=True, mode=0o755)
         
         total_docs = len(documents)
         if total_docs == 0:
@@ -333,22 +333,14 @@ def initialize_vector_store(documents: List, persist_directory: str = "/tmp/chro
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # Si se debe crear nuevo o no existe vector store, crear uno nuevo
+        # Si se debe crear nuevo o no existe vector store, crear uno nuevo EN MEMORIA
         if crear_nuevo or st.session_state.vector_store is None:
-            # Limpiar el directorio si se crea nuevo
-            if crear_nuevo and Path(persist_directory).exists():
-                try:
-                    shutil.rmtree(persist_directory)
-                    Path(persist_directory).mkdir(parents=True, exist_ok=True)
-                except Exception:
-                    pass
-            
-            # Crear nuevo vector store con el primer lote
+            # Crear nuevo vector store en memoria con el primer lote
             first_batch = documents[0:min(batch_size, total_docs)]
             st.session_state.vector_store = Chroma.from_documents(
                 documents=first_batch,
-                embedding=embeddings,
-                persist_directory=persist_directory
+                embedding=embeddings
+                # No especificamos persist_directory para usar modo in-memory
             )
             
             # Actualizar barra de progreso para el primer lote
@@ -403,6 +395,8 @@ def initialize_vector_store(documents: List, persist_directory: str = "/tmp/chro
         return st.session_state.vector_store
     except Exception as e:
         st.error(f"Error al inicializar vector store: {str(e)}")
+        import traceback
+        st.error(f"Detalles: {traceback.format_exc()}")
         return None
 
 
@@ -417,7 +411,7 @@ def initialize_conversation_chain(temperature: float = 0.7, max_tokens: int = 20
         
         if not project_id:
             # Si no hay credenciales de servicio, intentar con API key
-            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
             if not api_key:
                 st.error(
                     "❌ No se encontraron credenciales para el modelo de chat.\n\n"
@@ -427,7 +421,7 @@ def initialize_conversation_chain(temperature: float = 0.7, max_tokens: int = 20
                 return None
             
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.0-flash-exp",
                 temperature=temperature,
                 max_output_tokens=max_tokens,
                 api_key=api_key
@@ -435,7 +429,7 @@ def initialize_conversation_chain(temperature: float = 0.7, max_tokens: int = 20
         else:
             # Usar Vertex AI con credenciales de servicio
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.0-flash-exp",
                 temperature=temperature,
                 max_output_tokens=max_tokens,
                 vertexai=True,
@@ -825,13 +819,8 @@ with st.sidebar:
         st.session_state.archivos_nube = []
         st.session_state.archivo_activo = None
         
-        # Intentar limpiar el directorio de Chroma si existe
-        try:
-            persist_directory = "/tmp/chroma_db"
-            if Path(persist_directory).exists():
-                shutil.rmtree(persist_directory)
-        except Exception as e:
-            pass  # Silenciar error si no se puede eliminar
+        # Nota: En modo in-memory, no hay directorio que limpiar
+        # El vector store se limpia automáticamente al reiniciar st.session_state
         
         st.success("✅ Memoria limpiada exitosamente. Puedes comenzar de cero.")
         st.rerun()
