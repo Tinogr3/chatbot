@@ -1,0 +1,25 @@
+# Core application
+streamlit>=1.30.0
+python-dotenv>=1.0.0
+
+# LangChain ecosystem
+# Usamos >= para obtener la versión 0.3.x (la estable actual)
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-google-vertexai>=1.0.0
+
+# Nota: No hace falta listar 'langchain-core' ni 'text-splitters',
+# se instalan automáticamente con 'langchain'.
+
+# Google Cloud
+google-cloud-storage>=2.14.0
+google-cloud-aiplatform>=1.38.0
+
+# PDF Processing
+pypdf>=4.0.0
+
+# Vector Store
+chromadb>=0.4.22
+
+# Utilities
+tiktoken>=0.5.1
