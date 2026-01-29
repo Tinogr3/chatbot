@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import TokenTextSplitter
-from langchain_google_vertexai import VertexAIEmbeddings, ChatVertexAI
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_classic.chains import ConversationalRetrievalChain
 from langchain_classic.memory import ConversationBufferMemory
@@ -48,6 +48,27 @@ if "archivo_activo" not in st.session_state:
 BUCKET_NAME = "chatbot-rag-documents"
 
 
+def get_credentials_and_project():
+    """Obtiene las credenciales de servicio y el project_id."""
+    try:
+        creds_path = None
+        for file in os.listdir("."):
+            if file.endswith(".json") and "client" in file.lower():
+                creds_path = file
+                break
+        
+        if not creds_path:
+            return None, None
+        
+        credentials = service_account.Credentials.from_service_account_file(
+            creds_path,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        return credentials, credentials.project_id
+    except Exception as e:
+        return None, None
+
+
 def get_gcs_client():
     """Obtiene el cliente de Google Cloud Storage usando credenciales."""
     try:
@@ -75,9 +96,33 @@ def get_gcs_client():
 
 @st.cache_resource
 def get_embeddings():
-    """Inicializa el modelo de embeddings de Vertex AI."""
+    """Inicializa el modelo de embeddings de Google Generative AI usando Vertex AI."""
     try:
-        return VertexAIEmbeddings(model_name="text-embedding-004", location="us-central1")
+        credentials, project_id = get_credentials_and_project()
+        
+        if not project_id:
+            # Si no hay credenciales de servicio, intentar con API key
+            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            if api_key:
+                return GoogleGenerativeAIEmbeddings(
+                    model="text-embedding-004",
+                    api_key=api_key
+                )
+            else:
+                st.error(
+                    "❌ No se encontraron credenciales.\n\n"
+                    "Opción 1: Coloca un archivo JSON de credenciales de servicio en el directorio.\n"
+                    "Opción 2: Configura GOOGLE_API_KEY o GEMINI_API_KEY en tu archivo .env"
+                )
+                return None
+        
+        # Usar Vertex AI con credenciales de servicio
+        return GoogleGenerativeAIEmbeddings(
+            model="text-embedding-004",
+            vertexai=True,
+            project=project_id,
+            location="us-central1"
+        )
     except Exception as e:
         st.error(f"Error al inicializar embeddings: {str(e)}")
         return None
@@ -222,12 +267,35 @@ def initialize_conversation_chain(temperature: float = 0.7, max_tokens: int = 20
             return None
         
         # Inicializar el modelo de chat
-        llm = ChatVertexAI(
-            model_name="gemini-2.5-flash",
-            location="us-central1",
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-        )
+        credentials, project_id = get_credentials_and_project()
+        
+        if not project_id:
+            # Si no hay credenciales de servicio, intentar con API key
+            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            if not api_key:
+                st.error(
+                    "❌ No se encontraron credenciales para el modelo de chat.\n\n"
+                    "Opción 1: Coloca un archivo JSON de credenciales de servicio en el directorio.\n"
+                    "Opción 2: Configura GOOGLE_API_KEY o GEMINI_API_KEY en tu archivo .env"
+                )
+                return None
+            
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+                api_key=api_key
+            )
+        else:
+            # Usar Vertex AI con credenciales de servicio
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+                vertexai=True,
+                project=project_id,
+                location="us-central1"
+            )
         
         # Configurar memoria
         memory = ConversationBufferMemory(

@@ -7,9 +7,7 @@ python-dotenv>=1.0.0
 langchain>=0.3.0
 langchain-community>=0.3.0
 langchain-google-vertexai>=1.0.0
-
-# Nota: No hace falta listar 'langchain-core' ni 'text-splitters',
-# se instalan automáticamente con 'langchain'.
+langchain-google-genai>=1.0.0
 
 # Google Cloud
 google-cloud-storage>=2.14.0
