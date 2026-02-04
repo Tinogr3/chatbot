@@ -5,8 +5,10 @@ Contiene la lógica de LangChain, embeddings, procesamiento de PDFs y creación 
 import os
 import re
 import time
+import base64
+import tempfile
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader
@@ -16,9 +18,159 @@ from langchain_community.vectorstores import Chroma
 from langchain_classic.chains import ConversationalRetrievalChain
 from langchain_classic.memory import ConversationBufferMemory
 from langchain_core.prompts import PromptTemplate
+from langchain_core.documents import Document
 
 from config import get_credentials_and_project
 from user_memory import UserMemoryManager
+
+
+def get_gemini_vision_model():
+    """Obtiene el modelo Gemini con capacidades de visión para describir imágenes."""
+    try:
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        if api_key:
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash",
+                google_api_key=api_key,
+                temperature=0.3,
+                max_tokens=1024
+            )
+        
+        credentials, project_id = get_credentials_and_project()
+        if credentials and project_id:
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.0-flash",
+                credentials=credentials,
+                project=project_id,
+                temperature=0.3,
+                max_tokens=1024
+            )
+    except Exception as e:
+        print(f"Error inicializando modelo de visión: {e}")
+    return None
+
+
+def describe_image_with_gemini(image_bytes: bytes, context: str = "") -> str:
+    """
+    Genera una descripción textual de una imagen usando Gemini.
+    
+    Args:
+        image_bytes: Bytes de la imagen.
+        context: Contexto adicional (ej: nombre del documento).
+    
+    Returns:
+        Descripción textual de la imagen.
+    """
+    model = get_gemini_vision_model()
+    if not model:
+        return ""
+    
+    try:
+        # Codificar imagen en base64
+        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+        
+        prompt = f"""Analiza esta imagen de un documento educativo y proporciona una descripción detallada y útil para el aprendizaje.
+
+Incluye:
+- Tipo de contenido visual (diagrama, gráfico, tabla, fórmula, ilustración, etc.)
+- Descripción del contenido principal
+- Datos, valores o texto visible relevante
+- Relaciones o conceptos que muestra
+- Contexto educativo si es evidente
+
+{f'Contexto del documento: {context}' if context else ''}
+
+Responde en español con una descripción clara y concisa."""
+
+        # Crear mensaje con imagen
+        from langchain_core.messages import HumanMessage
+        
+        message = HumanMessage(
+            content=[
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{image_b64}"}
+                }
+            ]
+        )
+        
+        response = model.invoke([message])
+        return response.content.strip()
+        
+    except Exception as e:
+        print(f"Error describiendo imagen: {e}")
+        return ""
+
+
+def extract_images_from_pdf(pdf_path: str) -> List[Tuple[bytes, int, str]]:
+    """
+    Extrae imágenes de un PDF usando unstructured.
+    
+    Args:
+        pdf_path: Ruta al archivo PDF.
+    
+    Returns:
+        Lista de tuplas (image_bytes, page_number, image_id).
+    """
+    images = []
+    
+    try:
+        from unstructured.partition.pdf import partition_pdf
+        from unstructured.documents.elements import Image
+        import fitz  # PyMuPDF - más confiable para extraer imágenes
+        
+        # Usar PyMuPDF para extraer imágenes (más robusto)
+        doc = fitz.open(pdf_path)
+        
+        for page_num, page in enumerate(doc):
+            image_list = page.get_images()
+            
+            for img_index, img in enumerate(image_list):
+                try:
+                    xref = img[0]
+                    base_image = doc.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    
+                    # Filtrar imágenes muy pequeñas (probablemente iconos)
+                    if len(image_bytes) > 5000:  # Más de 5KB
+                        image_id = f"page{page_num + 1}_img{img_index + 1}"
+                        images.append((image_bytes, page_num + 1, image_id))
+                except Exception as e:
+                    continue
+        
+        doc.close()
+        
+    except ImportError:
+        print("[RAG] PyMuPDF no disponible, intentando con unstructured...")
+        try:
+            from unstructured.partition.pdf import partition_pdf
+            
+            # Crear directorio temporal para imágenes
+            with tempfile.TemporaryDirectory() as temp_dir:
+                elements = partition_pdf(
+                    filename=pdf_path,
+                    extract_images_in_pdf=True,
+                    extract_image_block_output_dir=temp_dir,
+                    strategy="hi_res"
+                )
+                
+                # Buscar imágenes extraídas
+                import glob
+                for img_path in glob.glob(os.path.join(temp_dir, "*.png")) + \
+                               glob.glob(os.path.join(temp_dir, "*.jpg")):
+                    with open(img_path, 'rb') as f:
+                        image_bytes = f.read()
+                    if len(image_bytes) > 5000:
+                        img_name = Path(img_path).stem
+                        images.append((image_bytes, 1, img_name))
+                        
+        except Exception as e:
+            print(f"Error extrayendo imágenes con unstructured: {e}")
+    except Exception as e:
+        print(f"Error extrayendo imágenes: {e}")
+    
+    return images
 
 
 @st.cache_resource
@@ -75,10 +227,21 @@ def limpiar_texto(texto: str) -> str:
     return texto
 
 
-def procesar_pdf(ruta_archivo: str) -> List:
-    """Procesa un PDF desde una ruta y retorna los documentos divididos con metadatos."""
+def procesar_pdf(ruta_archivo: str, extract_images: bool = True) -> List:
+    """Procesa un PDF desde una ruta y retorna los documentos divididos con metadatos.
+    
+    Args:
+        ruta_archivo: Ruta al archivo PDF.
+        extract_images: Si True, extrae imágenes y genera descripciones con Gemini.
+    
+    Returns:
+        Lista de documentos (chunks de texto + descripciones de imágenes).
+    """
     try:
-        # Cargar PDF usando PyPDFLoader
+        nombre_archivo = Path(ruta_archivo).name
+        all_documents = []
+        
+        # === 1. Procesar texto del PDF ===
         loader = PyPDFLoader(ruta_archivo)
         documents = loader.load()
 
@@ -87,46 +250,82 @@ def procesar_pdf(ruta_archivo: str) -> List:
             if doc.page_content:
                 doc.page_content = limpiar_texto(doc.page_content)
 
-        # Dividir documentos usando RecursiveCharacterTextSplitter con separadores lógicos
+        # Dividir documentos usando RecursiveCharacterTextSplitter
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
             separators=[
-                "\\n\\n",  # Saltos de párrafo (prioridad más alta)
-                "\\n",    # Saltos de línea
-                ". ",    # Puntos seguidos de espacio
-                "! ",    # Signos de exclamación
-                "? ",    # Signos de interrogación
+                "\n\n",  # Saltos de párrafo
+                "\n",    # Saltos de línea
+                ". ",    # Puntos
+                "! ",    # Exclamación
+                "? ",    # Interrogación
                 "; ",    # Punto y coma
                 ", ",    # Comas
                 " ",     # Espacios
-                ""       # Caracteres individuales (último recurso)
+                ""       # Último recurso
             ],
             length_function=len,
         )
 
-        # Dividir documentos (RecursiveCharacterTextSplitter conserva automáticamente los metadatos)
         splits = text_splitter.split_documents(documents)
         
-        # Asegurar que los metadatos se conserven correctamente en cada chunk
-        nombre_archivo = Path(ruta_archivo).name
+        # Asegurar metadatos correctos en cada chunk de texto
         for split in splits:
-            # Asegurar que siempre tengamos el nombre del archivo como fuente
             split.metadata["source"] = nombre_archivo
+            split.metadata["type"] = "text"
             
-            # El número de página debería estar ya en los metadatos del documento original
-            # PyPDFLoader incluye 'page' en los metadatos, y RecursiveCharacterTextSplitter
-            # los conserva automáticamente. Si no está, intentamos mantenerlo del documento original.
             if "page" not in split.metadata:
-                # Buscar en los documentos originales para encontrar la página correspondiente
-                # Esto es una medida de seguridad por si acaso
                 for doc in documents:
                     if doc.page_content and doc.page_content in split.page_content:
                         if "page" in doc.metadata:
                             split.metadata["page"] = doc.metadata["page"]
                         break
-
-        return splits
+        
+        all_documents.extend(splits)
+        
+        # === 2. Extraer y describir imágenes ===
+        if extract_images:
+            st.info("🖼️ Extrayendo y analizando imágenes del PDF...")
+            
+            images = extract_images_from_pdf(ruta_archivo)
+            
+            if images:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                for i, (image_bytes, page_num, image_id) in enumerate(images):
+                    progress = (i + 1) / len(images)
+                    progress_bar.progress(progress)
+                    status_text.text(f"Analizando imagen {i + 1}/{len(images)}...")
+                    
+                    # Generar descripción con Gemini
+                    description = describe_image_with_gemini(
+                        image_bytes, 
+                        context=f"Página {page_num} del documento '{nombre_archivo}'"
+                    )
+                    
+                    if description:
+                        # Crear documento con la descripción de la imagen
+                        image_doc = Document(
+                            page_content=f"[IMAGEN - {image_id}]\n{description}",
+                            metadata={
+                                "source": nombre_archivo,
+                                "type": "image",
+                                "page": page_num,
+                                "image_id": image_id
+                            }
+                        )
+                        all_documents.append(image_doc)
+                    
+                    # Pequeña pausa para no saturar la API
+                    time.sleep(0.5)
+                
+                progress_bar.empty()
+                status_text.empty()
+                st.success(f"✅ Analizadas {len(images)} imágenes del PDF.")
+        
+        return all_documents
     except Exception as e:
         st.error(f"Error al procesar PDF: {str(e)}")
         return []
