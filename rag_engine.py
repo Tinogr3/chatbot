@@ -18,6 +18,7 @@ from langchain_classic.memory import ConversationBufferMemory
 from langchain_core.prompts import PromptTemplate
 
 from config import get_credentials_and_project
+from user_memory import UserMemoryManager
 
 
 @st.cache_resource
@@ -131,27 +132,43 @@ def procesar_pdf(ruta_archivo: str) -> List:
         return []
 
 
-def initialize_vector_store(documents: List, existing_vector_store=None) -> Optional[object]:
+def initialize_vector_store(
+    documents: List = None, 
+    existing_vector_store=None,
+    persist_directory: str = "./chroma_db"
+) -> Optional[object]:
     """Inicializa o actualiza el vector store de Chroma procesando documentos en lotes.
     
     Args:
-        documents: Lista de documentos a procesar
+        documents: Lista de documentos a procesar (None para solo cargar existente)
         existing_vector_store: Vector store existente al que agregar documentos (None para crear nuevo)
+        persist_directory: Directorio donde persistir la base de datos ChromaDB
     
     Returns:
         El objeto vector_store creado o actualizado
     
-    Nota: Usa ChromaDB en memoria debido a incompatibilidades de SQLite con WSL2.
+    Nota: Usa persistencia local en disco para mantener los embeddings entre sesiones.
     """
     try:
         embeddings = get_embeddings()
         if not embeddings:
             return None
         
-        total_docs = len(documents)
-        if total_docs == 0:
-            return existing_vector_store
+        # Si no hay documentos, intentar cargar base existente
+        if documents is None or len(documents) == 0:
+            # Verificar si existe la base de datos
+            if os.path.exists(persist_directory) and os.listdir(persist_directory):
+                st.info("📂 Cargando base de datos de vectores existente...")
+                vector_store = Chroma(
+                    persist_directory=persist_directory,
+                    embedding_function=embeddings
+                )
+                st.success("✅ Base de datos cargada correctamente.")
+                return vector_store
+            else:
+                return existing_vector_store
         
+        total_docs = len(documents)
         batch_size = 5
         num_batches = (total_docs + batch_size - 1) // batch_size  # Redondeo hacia arriba
         
@@ -159,58 +176,76 @@ def initialize_vector_store(documents: List, existing_vector_store=None) -> Opti
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # Si no existe vector store, crear uno nuevo EN MEMORIA
+        # Si no existe vector store, verificar si hay uno persistido o crear nuevo
         if existing_vector_store is None:
-            # Crear nuevo vector store en memoria con el primer lote
-            first_batch = documents[0:min(batch_size, total_docs)]
-            vector_store = Chroma.from_documents(
-                documents=first_batch,
-                embedding=embeddings
-                # No especificamos persist_directory para usar modo in-memory
-            )
-            
-            # Actualizar barra de progreso para el primer lote
-            if len(first_batch) > 0:
-                progress = len(first_batch) / total_docs
-                progress_bar.progress(progress)
-                status_text.text(f"Procesando lote 1/{num_batches} ({len(first_batch)} documentos)...")
-                if total_docs > batch_size:
-                    time.sleep(2)
-            
-            # Agregar documentos restantes en lotes
-            for i in range(batch_size, total_docs, batch_size):
-                batch = documents[i:i + batch_size]
-                batch_num = (i // batch_size) + 1
+            # Verificar si ya existe una base de datos persistida
+            if os.path.exists(persist_directory) and os.listdir(persist_directory):
+                st.info("📂 Cargando base de datos existente y agregando nuevos documentos...")
+                vector_store = Chroma(
+                    persist_directory=persist_directory,
+                    embedding_function=embeddings
+                )
+            else:
+                # Crear nuevo vector store con persistencia
+                first_batch = documents[0:min(batch_size, total_docs)]
+                vector_store = Chroma.from_documents(
+                    documents=first_batch,
+                    embedding=embeddings,
+                    persist_directory=persist_directory
+                )
                 
-                # Actualizar barra de progreso
-                progress = (i + len(batch)) / total_docs
-                progress_bar.progress(progress)
-                status_text.text(f"Procesando lote {batch_num + 1}/{num_batches} ({len(batch)} documentos)...")
+                # Actualizar barra de progreso para el primer lote
+                if len(first_batch) > 0:
+                    progress = len(first_batch) / total_docs
+                    progress_bar.progress(progress)
+                    status_text.text(f"Procesando lote 1/{num_batches} ({len(first_batch)} documentos)...")
+                    if total_docs > batch_size:
+                        time.sleep(2)
                 
-                # Agregar lote al vector store
-                vector_store.add_documents(batch)
+                # Agregar documentos restantes en lotes
+                for i in range(batch_size, total_docs, batch_size):
+                    batch = documents[i:i + batch_size]
+                    batch_num = (i // batch_size) + 1
+                    
+                    # Actualizar barra de progreso
+                    progress = (i + len(batch)) / total_docs
+                    progress_bar.progress(progress)
+                    status_text.text(f"Procesando lote {batch_num + 1}/{num_batches} ({len(batch)} documentos)...")
+                    
+                    # Agregar lote al vector store
+                    vector_store.add_documents(batch)
+                    
+                    # Esperar 2 segundos antes del siguiente lote (excepto en el último)
+                    if i + batch_size < total_docs:
+                        time.sleep(2)
                 
-                # Esperar 2 segundos antes del siguiente lote (excepto en el último)
-                if i + batch_size < total_docs:
-                    time.sleep(2)
+                # Completar barra de progreso
+                progress_bar.progress(1.0)
+                status_text.text(f"✅ Procesados {total_docs} documentos en {num_batches} lotes.")
+                time.sleep(0.5)
+                status_text.empty()
+                progress_bar.empty()
+                
+                return vector_store
         else:
-            # Agregar documentos al vector store existente en lotes
             vector_store = existing_vector_store
-            for i in range(0, total_docs, batch_size):
-                batch = documents[i:i + batch_size]
-                batch_num = (i // batch_size) + 1
-                
-                # Actualizar barra de progreso
-                progress = (i + len(batch)) / total_docs
-                progress_bar.progress(progress)
-                status_text.text(f"Procesando lote {batch_num}/{num_batches} ({len(batch)} documentos)...")
-                
-                # Agregar lote al vector store
-                vector_store.add_documents(batch)
-                
-                # Esperar 2 segundos antes del siguiente lote (excepto en el último)
-                if i + batch_size < total_docs:
-                    time.sleep(2)
+        
+        # Agregar documentos al vector store existente en lotes
+        for i in range(0, total_docs, batch_size):
+            batch = documents[i:i + batch_size]
+            batch_num = (i // batch_size) + 1
+            
+            # Actualizar barra de progreso
+            progress = (i + len(batch)) / total_docs
+            progress_bar.progress(progress)
+            status_text.text(f"Procesando lote {batch_num}/{num_batches} ({len(batch)} documentos)...")
+            
+            # Agregar lote al vector store
+            vector_store.add_documents(batch)
+            
+            # Esperar 2 segundos antes del siguiente lote (excepto en el último)
+            if i + batch_size < total_docs:
+                time.sleep(2)
         
         # Completar barra de progreso
         progress_bar.progress(1.0)
@@ -227,13 +262,19 @@ def initialize_vector_store(documents: List, existing_vector_store=None) -> Opti
         return None
 
 
-def initialize_conversation_chain(vector_store, temperature: float = 0.7, max_tokens: int = 2048):
+def initialize_conversation_chain(
+    vector_store, 
+    temperature: float = 0.7, 
+    max_tokens: int = 2048,
+    session_id: str = None
+):
     """Inicializa la cadena de conversación con memoria.
     
     Args:
         vector_store: El vector store a usar para retrieval
         temperature: Nivel de creatividad del modelo
         max_tokens: Límite de tokens en la respuesta
+        session_id: ID de sesión para cargar hechos del usuario
     
     Returns:
         La chain de conversación configurada
@@ -282,8 +323,22 @@ def initialize_conversation_chain(vector_store, temperature: float = 0.7, max_to
             output_key="answer"
         )
         
+        # Obtener hechos del usuario si hay session_id
+        user_facts_section = ""
+        if session_id:
+            try:
+                user_memory = UserMemoryManager()
+                user_facts = user_memory.get_user_facts_formatted(session_id)
+                if user_facts:
+                    user_facts_section = f"""\n\nINFORMACIÓN CONOCIDA SOBRE EL USUARIO:
+{user_facts}
+
+Usa esta información para personalizar tus respuestas cuando sea relevante."""
+            except Exception as e:
+                print(f"Error cargando hechos del usuario: {e}")
+        
         # System prompt personalizado mejorado
-        system_template = """Eres un tutor universitario experto y preciso. Sigue estas instrucciones estrictamente:
+        system_template = f"""Eres un tutor universitario experto y preciso. Sigue estas instrucciones estrictamente:{user_facts_section}
 
 INSTRUCCIONES:
 1. ANTES de responder, piensa paso a paso:
@@ -308,10 +363,10 @@ INSTRUCCIONES:
    - Cita el documento de donde proviene cada pregunta
 
 CONTEXTO PROPORCIONADO:
-{context}
+{{context}}
 
 PREGUNTA DEL USUARIO:
-{question}
+{{question}}
 
 RESPUESTA (piensa paso a paso, cita las fuentes, sé preciso):"""
         

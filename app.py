@@ -4,8 +4,13 @@ Interfaz de usuario que coordina los módulos de configuración, RAG y GCS.
 """
 import os
 import tempfile
+import uuid
 
 import streamlit as st
+
+# Importar el gestor de historial de chat
+from chat_manager import ChatHistoryManager
+from user_memory import UserMemoryManager
 
 # Importar funciones de los módulos
 from config import BUCKET_NAME
@@ -26,12 +31,22 @@ st.set_page_config(
     layout="wide"
 )
 
+# Inicializar gestor de historial de chat y memoria de usuario
+chat_manager = ChatHistoryManager()
+user_memory = UserMemoryManager()
+
+# Inicializar session_id único para persistencia
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+
 # Inicializar variables de sesión
+# Cargar historial desde la base de datos si existe
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = chat_manager.get_history(st.session_state.session_id)
 
 if "vector_store" not in st.session_state:
-    st.session_state.vector_store = None
+    # Intentar cargar base de datos existente de ChromaDB
+    st.session_state.vector_store = initialize_vector_store()
 
 if "conversation_chain" not in st.session_state:
     st.session_state.conversation_chain = None
@@ -71,6 +86,8 @@ with st.sidebar:
         st.session_state.modo_operacion = modo_operacion
         st.session_state.vector_store = None
         st.session_state.conversation_chain = None
+        # Limpiar historial en memoria y en base de datos
+        chat_manager.delete_history(st.session_state.session_id)
         st.session_state.messages = []
         st.session_state.archivos_manuales = []
         st.session_state.archivos_nube = []
@@ -296,7 +313,8 @@ with st.sidebar:
     # Botón para limpiar memoria
     st.subheader("🧹 Gestión de Sesión")
     if st.button("🗑️ Limpiar Memoria", help="Borra el historial del chat y el vector store para empezar de cero"):
-        # Limpiar el historial de mensajes
+        # Limpiar el historial de mensajes en base de datos
+        chat_manager.delete_history(st.session_state.session_id)
         st.session_state.messages = []
         
         # Limpiar el vector store y la cadena de conversación
@@ -309,8 +327,7 @@ with st.sidebar:
         st.session_state.archivos_nube = []
         st.session_state.archivo_activo = None
         
-        # Nota: En modo in-memory, no hay directorio que limpiar
-        # El vector store se limpia automáticamente al reiniciar st.session_state
+        # Nota: El historial se elimina de la base de datos SQLite
         
         st.success("✅ Memoria limpiada exitosamente. Puedes comenzar de cero.")
         st.rerun()
@@ -333,7 +350,7 @@ with st.sidebar:
         "Límite de Tokens",
         min_value=256,
         max_value=65535,
-        value=2048,
+        value=65535,
         step=256,
         help="Número máximo de tokens en la respuesta"
     )
@@ -369,7 +386,8 @@ else:
             st.session_state.conversation_chain = initialize_conversation_chain(
                 vector_store=st.session_state.vector_store,
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
+                session_id=st.session_state.session_id
             )
     
     if st.session_state.conversation_chain:
@@ -384,8 +402,9 @@ else:
         
         # Input del usuario
         if prompt := st.chat_input("Escribe tu pregunta aquí..."):
-            # Agregar mensaje del usuario al historial
+            # Agregar mensaje del usuario al historial y persistir
             st.session_state.messages.append({"role": "user", "content": prompt})
+            chat_manager.save_message(st.session_state.session_id, "user", prompt)
             with st.chat_message("user"):
                 st.markdown(prompt)
             
@@ -414,17 +433,40 @@ else:
                                 for source in sources:
                                     st.write(f"• {source}")
                             
-                            # Agregar respuesta al historial con fuentes
+                            # Agregar respuesta al historial con fuentes y persistir
                             st.session_state.messages.append({
                                 "role": "assistant",
                                 "content": answer,
                                 "sources": sources
                             })
+                            chat_manager.save_message(
+                                st.session_state.session_id, 
+                                "assistant", 
+                                answer, 
+                                sources
+                            )
+                            # Extraer hechos del usuario de forma asíncrona
+                            user_memory.extract_and_save_async(
+                                st.session_state.session_id,
+                                prompt,
+                                answer
+                            )
                         else:
                             st.session_state.messages.append({
                                 "role": "assistant",
                                 "content": answer
                             })
+                            chat_manager.save_message(
+                                st.session_state.session_id, 
+                                "assistant", 
+                                answer
+                            )
+                            # Extraer hechos del usuario de forma asíncrona
+                            user_memory.extract_and_save_async(
+                                st.session_state.session_id,
+                                prompt,
+                                answer
+                            )
                     except Exception as e:
                         error_msg = f"Error al generar respuesta: {str(e)}"
                         st.error(error_msg)
@@ -432,6 +474,11 @@ else:
                             "role": "assistant",
                             "content": error_msg
                         })
+                        chat_manager.save_message(
+                            st.session_state.session_id, 
+                            "assistant", 
+                            error_msg
+                        )
     else:
         st.error("Error al inicializar la cadena de conversación. Verifica la configuración.")
 
