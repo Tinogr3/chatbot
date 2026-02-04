@@ -23,6 +23,13 @@ from gcs_utils import (
     procesar_todos_pdfs_nube,
     upload_to_gcs
 )
+from media_processor import (
+    process_video,
+    is_youtube_url,
+    extract_video_id,
+    get_youtube_embed_url,
+    format_timestamp
+)
 
 # Configuración de la página
 st.set_page_config(
@@ -65,6 +72,9 @@ if "archivos_manuales" not in st.session_state:
 
 if "archivos_nube" not in st.session_state:
     st.session_state.archivos_nube = []
+
+if "videos_procesados" not in st.session_state:
+    st.session_state.videos_procesados = []
 
 
 # Sidebar de configuración
@@ -310,6 +320,63 @@ with st.sidebar:
     
     st.divider()
     
+    # Sección de Videos de YouTube (disponible en todos los modos)
+    st.subheader("🎬 Videos de YouTube")
+    st.info("Añade videos de YouTube para extraer conocimiento de sus transcripciones.")
+    
+    youtube_url = st.text_input(
+        "URL del video de YouTube",
+        placeholder="https://www.youtube.com/watch?v=...",
+        help="Pega la URL de un video de YouTube para extraer su transcripción"
+    )
+    
+    if youtube_url:
+        if st.button("🎥 Procesar Video"):
+            if is_youtube_url(youtube_url):
+                with st.spinner("Extrayendo transcripción del video..."):
+                    try:
+                        documents = process_video(youtube_url)
+                        
+                        if documents:
+                            # Agregar al vector store
+                            vector_store = initialize_vector_store(
+                                documents, 
+                                existing_vector_store=st.session_state.vector_store
+                            )
+                            
+                            if vector_store:
+                                st.session_state.vector_store = vector_store
+                                
+                                # Agregar a la lista de videos procesados
+                                video_id = extract_video_id(youtube_url)
+                                if youtube_url not in st.session_state.videos_procesados:
+                                    st.session_state.videos_procesados.append(youtube_url)
+                                
+                                st.success(f"✅ Video procesado correctamente.")
+                                st.info(f"Se generaron {len(documents)} chunks con timestamps.")
+                                
+                                # Reinicializar la cadena de conversación
+                                st.session_state.conversation_chain = None
+                            else:
+                                st.error("Error al agregar video al vector store.")
+                        else:
+                            st.warning("No se pudo extraer contenido del video.")
+                    except ValueError as e:
+                        st.error(f"❌ {str(e)}")
+                    except Exception as e:
+                        st.error(f"❌ Error al procesar video: {str(e)}")
+            else:
+                st.error("Por favor, introduce una URL válida de YouTube.")
+    
+    # Mostrar videos procesados
+    if st.session_state.videos_procesados:
+        st.write("**Videos procesados:**")
+        for video_url in st.session_state.videos_procesados:
+            video_id = extract_video_id(video_url)
+            st.write(f"🎬 `{video_id}`")
+    
+    st.divider()
+    
     # Botón para limpiar memoria
     st.subheader("🧹 Gestión de Sesión")
     if st.button("🗑️ Limpiar Memoria", help="Borra el historial del chat y el vector store para empezar de cero"):
@@ -325,6 +392,7 @@ with st.sidebar:
         st.session_state.processed_files = []
         st.session_state.archivos_manuales = []
         st.session_state.archivos_nube = []
+        st.session_state.videos_procesados = []
         st.session_state.archivo_activo = None
         
         # Nota: El historial se elimina de la base de datos SQLite
@@ -430,8 +498,38 @@ else:
                                 for doc in source_documents
                             ]))
                             with st.expander("📄 Fuentes utilizadas"):
-                                for source in sources:
-                                    st.write(f"• {source}")
+                                # Separar fuentes por tipo
+                                video_sources = []
+                                doc_sources = []
+                                
+                                for doc in source_documents:
+                                    source = doc.metadata.get("source", "Desconocido")
+                                    doc_type = doc.metadata.get("type", "document")
+                                    
+                                    if doc_type == "video":
+                                        video_id = doc.metadata.get("video_id")
+                                        timestamp = doc.metadata.get("timestamp", 0)
+                                        if video_id and (video_id, timestamp) not in [(v[0], v[1]) for v in video_sources]:
+                                            video_sources.append((video_id, timestamp, source))
+                                    else:
+                                        if source not in doc_sources:
+                                            doc_sources.append(source)
+                                
+                                # Mostrar documentos normales
+                                if doc_sources:
+                                    st.write("**📄 Documentos:**")
+                                    for source in doc_sources:
+                                        st.write(f"• {source}")
+                                
+                                # Mostrar videos con reproductor embebido
+                                if video_sources:
+                                    st.write("**🎬 Videos:**")
+                                    for video_id, timestamp, source in video_sources:
+                                        formatted_time = format_timestamp(timestamp)
+                                        st.write(f"• Video en {formatted_time}")
+                                        # Crear URL con timestamp
+                                        video_url = f"https://www.youtube.com/watch?v={video_id}&t={int(timestamp)}s"
+                                        st.video(video_url, start_time=int(timestamp))
                             
                             # Agregar respuesta al historial con fuentes y persistir
                             st.session_state.messages.append({

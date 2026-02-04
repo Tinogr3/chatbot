@@ -19,5 +19,10 @@ pypdf>=4.0.0
 # Vector Store
 chromadb>=0.4.22
 
+# YouTube Processing
+youtube-transcript-api>=0.6.0
+yt-dlp>=2024.1.0
+openai-whisper>=20231117
+
 # Utilities
 tiktoken>=0.5.1
