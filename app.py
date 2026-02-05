@@ -171,6 +171,63 @@ with st.sidebar:
         st.rerun()
     
     st.divider()
+    
+    # Sección: Memoria del Agente
+    with st.expander("🧠 Lo que sé de ti", expanded=False):
+        user_facts = user_memory.get_user_facts(st.session_state.session_id)
+        
+        if user_facts:
+            # Agrupar hechos por tipo
+            facts_by_type = {}
+            type_icons = {
+                "nombre": "👤",
+                "trabajo": "💼",
+                "educacion": "🎓",
+                "stack_tecnologico": "💻",
+                "preferencias": "⭐",
+                "ubicacion": "📍",
+                "otro": "📝"
+            }
+            type_labels = {
+                "nombre": "Nombre",
+                "trabajo": "Trabajo",
+                "educacion": "Educación",
+                "stack_tecnologico": "Stack",
+                "preferencias": "Intereses",
+                "ubicacion": "Ubicación",
+                "otro": "Otros"
+            }
+            
+            for fact in user_facts:
+                tipo = fact["tipo"]
+                if tipo not in facts_by_type:
+                    facts_by_type[tipo] = []
+                facts_by_type[tipo].append(fact["valor"])
+            
+            # Mostrar como tags/chips
+            for tipo, valores in facts_by_type.items():
+                icon = type_icons.get(tipo, "📝")
+                label = type_labels.get(tipo, tipo.capitalize())
+                st.markdown(f"**{icon} {label}:**")
+                
+                # Mostrar valores como badges inline
+                tags_html = " ".join([
+                    f'<span style="background-color: #262730; padding: 2px 8px; border-radius: 12px; margin: 2px; display: inline-block; font-size: 0.85em;">{v}</span>'
+                    for v in valores
+                ])
+                st.markdown(tags_html, unsafe_allow_html=True)
+            
+            st.markdown("")
+            
+            # Botón para borrar memoria
+            if st.button("🗑️ Olvídame", help="Borra toda la información que sé sobre ti", key="forget_me"):
+                deleted = user_memory.delete_user_facts(st.session_state.session_id)
+                st.success(f"✅ Se eliminaron {deleted} datos sobre ti.")
+                st.rerun()
+        else:
+            st.caption("Aún no sé nada sobre ti. A medida que conversemos, iré aprendiendo.")
+    
+    st.divider()
     st.header("⚙️ Configuración")
 
     # Selector de modo de operación
