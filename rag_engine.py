@@ -30,20 +30,20 @@ def get_gemini_vision_model():
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
             return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-pro",
                 google_api_key=api_key,
-                temperature=0.3,
-                max_tokens=1024
+                temperature=1,
+                max_tokens=16384
             )
         
         credentials, project_id = get_credentials_and_project()
         if credentials and project_id:
             return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model="gemini-2.5-pro",
                 credentials=credentials,
                 project=project_id,
-                temperature=0.3,
-                max_tokens=1024
+                temperature=1,
+                max_tokens=16384
             )
     except Exception as e:
         print(f"Error inicializando modelo de visión: {e}")
@@ -497,7 +497,7 @@ def initialize_conversation_chain(
                 return None
             
             llm = ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.0-flash-exp",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.5-pro",
                 temperature=temperature,
                 max_output_tokens=max_tokens,
                 api_key=api_key
@@ -505,7 +505,7 @@ def initialize_conversation_chain(
         else:
             # Usar Vertex AI con credenciales de servicio
             llm = ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.0-flash-exp",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.5-pro",
                 temperature=temperature,
                 max_output_tokens=max_tokens,
                 vertexai=True,

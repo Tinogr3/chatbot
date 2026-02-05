@@ -30,6 +30,13 @@ from media_processor import (
     get_youtube_embed_url,
     format_timestamp
 )
+from router import (
+    route_query,
+    get_direct_response,
+    get_summary_response,
+    LearningFlowManager,
+    QueryCategory
+)
 
 # Configuración de la página
 st.set_page_config(
@@ -139,6 +146,16 @@ if "archivos_nube" not in st.session_state:
 
 if "videos_procesados" not in st.session_state:
     st.session_state.videos_procesados = []
+
+# Variables para modo aprendizaje
+if "learning_mode" not in st.session_state:
+    st.session_state.learning_mode = False
+
+if "learning_topic" not in st.session_state:
+    st.session_state.learning_topic = None
+
+if "last_learning_content" not in st.session_state:
+    st.session_state.last_learning_content = None
 
 
 # Sidebar de configuración
@@ -543,6 +560,10 @@ else:
                         for source in message["sources"]:
                             st.write(f"• {source}")
         
+        # Mostrar indicador de modo aprendizaje si está activo
+        if st.session_state.learning_mode:
+            st.info("🎓 **Modo Aprendizaje activo** - Responde las preguntas para continuar. Escribe 'salir' para terminar.")
+        
         # Input del usuario
         if prompt := st.chat_input("Escribe tu pregunta aquí..."):
             # Agregar mensaje del usuario al historial y persistir
@@ -553,15 +574,83 @@ else:
             
             # Generar respuesta
             with st.chat_message("assistant"):
-                with st.spinner("Pensando..."):
+                with st.spinner("Analizando..."):
                     try:
-                        # Ejecutar la cadena de conversación
-                        result = st.session_state.conversation_chain.invoke({
-                            "question": prompt
-                        })
+                        answer = ""
+                        source_documents = []
+                        sources = []
                         
-                        answer = result.get("answer", "No se pudo generar una respuesta.")
-                        source_documents = result.get("source_documents", [])
+                        # Verificar si el usuario quiere salir del modo aprendizaje
+                        if st.session_state.learning_mode and prompt.lower().strip() in ['salir', 'exit', 'terminar', 'fin']:
+                            learning_manager = LearningFlowManager(
+                                st.session_state.vector_store,
+                                st.session_state.session_id
+                            )
+                            answer = learning_manager.end_learning_session()
+                            st.session_state.learning_mode = False
+                            st.session_state.learning_topic = None
+                            st.session_state.last_learning_content = None
+                        
+                        # Si estamos en modo aprendizaje, evaluar respuesta
+                        elif st.session_state.learning_mode:
+                            learning_manager = LearningFlowManager(
+                                st.session_state.vector_store,
+                                st.session_state.session_id
+                            )
+                            result = learning_manager.evaluate_answer(
+                                user_answer=prompt,
+                                topic=st.session_state.learning_topic,
+                                previous_content=st.session_state.last_learning_content or ""
+                            )
+                            answer = result.get("content", "No se pudo evaluar la respuesta.")
+                            source_documents = result.get("source_documents", [])
+                            st.session_state.last_learning_content = answer
+                        
+                        else:
+                            # Clasificar la query con el router
+                            category = route_query(prompt)
+                            
+                            if category == QueryCategory.CONVERSACION.value:
+                                # Respuesta directa sin RAG
+                                user_facts = user_memory.get_user_facts_formatted(st.session_state.session_id)
+                                answer = get_direct_response(
+                                    prompt, 
+                                    st.session_state.session_id,
+                                    user_facts
+                                )
+                            
+                            elif category == QueryCategory.RESUMEN.value:
+                                # Generar resumen
+                                result = get_summary_response(
+                                    prompt,
+                                    st.session_state.vector_store,
+                                    st.session_state.session_id
+                                )
+                                answer = result.get("answer", "No se pudo generar el resumen.")
+                                source_documents = result.get("source_documents", [])
+                            
+                            elif category == QueryCategory.APRENDIZAJE.value:
+                                # Iniciar modo aprendizaje
+                                learning_manager = LearningFlowManager(
+                                    st.session_state.vector_store,
+                                    st.session_state.session_id
+                                )
+                                result = learning_manager.start_learning_session(prompt)
+                                answer = result.get("content", "No se pudo iniciar la sesión de aprendizaje.")
+                                source_documents = result.get("source_documents", [])
+                                
+                                if result.get("is_learning_mode"):
+                                    st.session_state.learning_mode = True
+                                    st.session_state.learning_topic = result.get("topic", prompt)
+                                    st.session_state.last_learning_content = answer
+                            
+                            else:
+                                # PREGUNTA_DOCUMENTO u OTRO: usar RAG normal
+                                result = st.session_state.conversation_chain.invoke({
+                                    "question": prompt
+                                })
+                                answer = result.get("answer", "No se pudo generar una respuesta.")
+                                source_documents = result.get("source_documents", [])
                         
                         # Mostrar respuesta
                         st.markdown(answer)
@@ -602,44 +691,28 @@ else:
                                     for video_id, timestamp, source in video_sources:
                                         formatted_time = format_timestamp(timestamp)
                                         st.write(f"• Video en {formatted_time}")
-                                        # Crear URL con timestamp
                                         video_url = f"https://www.youtube.com/watch?v={video_id}&t={int(timestamp)}s"
                                         st.video(video_url, start_time=int(timestamp))
-                            
-                            # Agregar respuesta al historial con fuentes y persistir
-                            st.session_state.messages.append({
-                                "role": "assistant",
-                                "content": answer,
-                                "sources": sources
-                            })
-                            chat_manager.save_message(
-                                st.session_state.session_id, 
-                                "assistant", 
-                                answer, 
-                                sources
-                            )
-                            # Extraer hechos del usuario de forma asíncrona
-                            user_memory.extract_and_save_async(
-                                st.session_state.session_id,
-                                prompt,
-                                answer
-                            )
-                        else:
-                            st.session_state.messages.append({
-                                "role": "assistant",
-                                "content": answer
-                            })
-                            chat_manager.save_message(
-                                st.session_state.session_id, 
-                                "assistant", 
-                                answer
-                            )
-                            # Extraer hechos del usuario de forma asíncrona
-                            user_memory.extract_and_save_async(
-                                st.session_state.session_id,
-                                prompt,
-                                answer
-                            )
+                        
+                        # Agregar respuesta al historial y persistir
+                        msg_data = {"role": "assistant", "content": answer}
+                        if sources:
+                            msg_data["sources"] = sources
+                        st.session_state.messages.append(msg_data)
+                        chat_manager.save_message(
+                            st.session_state.session_id, 
+                            "assistant", 
+                            answer, 
+                            sources if sources else None
+                        )
+                        
+                        # Extraer hechos del usuario de forma asíncrona
+                        user_memory.extract_and_save_async(
+                            st.session_state.session_id,
+                            prompt,
+                            answer
+                        )
+                    
                     except Exception as e:
                         error_msg = f"Error al generar respuesta: {str(e)}"
                         st.error(error_msg)
