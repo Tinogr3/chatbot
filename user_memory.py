@@ -4,9 +4,11 @@ Extrae y almacena hechos sobre el usuario para personalizar las respuestas del c
 """
 
 import os
+import re
 import json
 import sqlite3
 import threading
+import time
 from datetime import datetime
 from typing import List, Dict, Optional
 from contextlib import contextmanager
@@ -141,14 +143,23 @@ RESPUESTA JSON:"""
             response = llm.invoke(extraction_prompt)
             content = response.content.strip()
             
-            # Limpiar la respuesta para obtener solo el JSON
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
+            # DEBUG: Log raw response
+            print(f"DEBUG JSON RAW: {content}")
+            
+            # Usar regex robusta para extraer el JSON array
+            # Buscar el primer '[' y el último ']'
+            json_match = re.search(r'\[.*\]', content, re.DOTALL)
+            if json_match:
+                content = json_match.group(0)
+            else:
+                # Intentar limpiar manualmente
+                if content.startswith("```json"):
+                    content = content[7:]
+                if content.startswith("```"):
+                    content = content[3:]
+                if content.endswith("```"):
+                    content = content[:-3]
+                content = content.strip()
             
             # Si está vacío o no es JSON válido, retornar lista vacía
             if not content or content == "[]":
@@ -168,19 +179,21 @@ RESPUESTA JSON:"""
             
             return validated_facts
             
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            print(f"[UserMemory] Error JSON decode: {e}")
             return []
         except Exception as e:
-            print(f"Error extrayendo hechos: {e}")
+            print(f"[UserMemory] Error extrayendo hechos: {e}")
             return []
     
-    def save_facts(self, session_id: str, facts: List[Dict]) -> int:
+    def save_facts(self, session_id: str, facts: List[Dict], max_retries: int = 3) -> int:
         """
         Guarda los hechos extraídos en la base de datos.
         
         Args:
             session_id: ID de la sesión del usuario.
             facts: Lista de hechos a guardar.
+            max_retries: Número máximo de reintentos si la DB está bloqueada.
         
         Returns:
             Número de hechos guardados.
@@ -189,22 +202,42 @@ RESPUESTA JSON:"""
             return 0
         
         saved_count = 0
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            for fact in facts:
-                try:
-                    cursor.execute("""
-                        INSERT INTO user_profile (session_id, fact_type, fact_value, confidence)
-                        VALUES (?, ?, ?, ?)
-                        ON CONFLICT(session_id, fact_type, fact_value) 
-                        DO UPDATE SET 
-                            confidence = MAX(confidence, excluded.confidence),
-                            updated_at = CURRENT_TIMESTAMP
-                    """, (session_id, fact["tipo"], fact["valor"], fact.get("confianza", 0.8)))
-                    saved_count += 1
-                except Exception as e:
-                    print(f"Error guardando hecho: {e}")
-            conn.commit()
+        
+        for attempt in range(max_retries):
+            try:
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    for fact in facts:
+                        try:
+                            cursor.execute("""
+                                INSERT INTO user_profile (session_id, fact_type, fact_value, confidence)
+                                VALUES (?, ?, ?, ?)
+                                ON CONFLICT(session_id, fact_type, fact_value) 
+                                DO UPDATE SET 
+                                    confidence = MAX(confidence, excluded.confidence),
+                                    updated_at = CURRENT_TIMESTAMP
+                            """, (session_id, fact["tipo"], fact["valor"], fact.get("confianza", 0.8)))
+                            saved_count += 1
+                        except sqlite3.IntegrityError as e:
+                            print(f"[UserMemory] Hecho duplicado ignorado: {e}")
+                        except Exception as e:
+                            print(f"[UserMemory] Error guardando hecho: {e}")
+                    conn.commit()
+                # Si llegamos aquí, el commit fue exitoso
+                break
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e).lower() and attempt < max_retries - 1:
+                    print(f"[UserMemory] DB bloqueada, reintentando ({attempt + 1}/{max_retries})...")
+                    time.sleep(0.5 * (attempt + 1))  # Backoff exponencial
+                else:
+                    print(f"[UserMemory] Error SQLite: {e}")
+                    break
+            except Exception as e:
+                print(f"[UserMemory] Error inesperado guardando hechos: {e}")
+                break
+        
+        if saved_count > 0:
+            print(f"[UserMemory] ✅ Guardados {saved_count} hechos para sesión {session_id}")
         
         return saved_count
     

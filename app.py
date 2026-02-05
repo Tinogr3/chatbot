@@ -769,6 +769,7 @@ else:
                             prompt,
                             answer
                         )
+                        st.toast('🧠 Analizando memoria...', icon='💾')
                     
                     except Exception as e:
                         error_msg = f"Error al generar respuesta: {str(e)}"
