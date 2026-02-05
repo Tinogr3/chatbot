@@ -42,12 +42,76 @@ st.set_page_config(
 chat_manager = ChatHistoryManager()
 user_memory = UserMemoryManager()
 
-# Inicializar session_id único para persistencia
+# Verificar si el usuario ya inició sesión
 if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
+    st.session_state.session_id = None
 
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+
+def show_welcome_screen():
+    """Muestra la pantalla de bienvenida para ingresar el nombre de usuario."""
+    st.title("📚 Bienvenido al Chatbot RAG Educativo")
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("""
+        ### 👋 ¡Hola!
+        
+        Para comenzar, ingresa tu **nombre de usuario** o **ID de sesión**.
+        
+        Esto nos permitirá:
+        - 💾 Guardar tu historial de conversaciones
+        - 🧠 Recordar información sobre ti
+        - 📊 Continuar donde lo dejaste
+        """)
+        
+        st.markdown("")
+        
+        with st.form("login_form"):
+            username = st.text_input(
+                "Nombre de Usuario / ID de Sesión",
+                placeholder="Ej: juan_perez, mi_sesion_123",
+                help="Usa el mismo nombre para recuperar tu historial en futuras sesiones"
+            )
+            
+            submit = st.form_submit_button("🚀 Comenzar", use_container_width=True)
+            
+            if submit:
+                if username and username.strip():
+                    # Limpiar y normalizar el nombre de usuario
+                    clean_username = username.strip().lower().replace(" ", "_")
+                    st.session_state.session_id = clean_username
+                    st.session_state.authenticated = True
+                    
+                    # Cargar historial existente
+                    st.session_state.messages = chat_manager.get_history(clean_username)
+                    
+                    # Cargar hechos del usuario
+                    user_facts = user_memory.get_user_facts(clean_username)
+                    if user_facts:
+                        st.success(f"¡Bienvenido de nuevo! Se cargaron {len(user_facts)} datos sobre ti.")
+                    else:
+                        st.success(f"¡Bienvenido, {username}! Se creó una nueva sesión.")
+                    
+                    st.rerun()
+                else:
+                    st.error("Por favor, ingresa un nombre de usuario válido.")
+        
+        st.markdown("")
+        st.info("💡 **Tip:** Usa siempre el mismo nombre para mantener tu historial y preferencias.")
+
+
+# Si no está autenticado, mostrar pantalla de bienvenida
+if not st.session_state.authenticated:
+    show_welcome_screen()
+    st.stop()
+
+# A partir de aquí, el usuario está autenticado
 # Inicializar variables de sesión
-# Cargar historial desde la base de datos si existe
 if "messages" not in st.session_state:
     st.session_state.messages = chat_manager.get_history(st.session_state.session_id)
 
@@ -79,6 +143,17 @@ if "videos_procesados" not in st.session_state:
 
 # Sidebar de configuración
 with st.sidebar:
+    # Mostrar usuario actual y opción de cerrar sesión
+    st.markdown(f"👤 **Usuario:** `{st.session_state.session_id}`")
+    if st.button("🚪 Cerrar Sesión", help="Cierra sesión para cambiar de usuario"):
+        st.session_state.session_id = None
+        st.session_state.authenticated = False
+        st.session_state.messages = []
+        st.session_state.vector_store = None
+        st.session_state.conversation_chain = None
+        st.rerun()
+    
+    st.divider()
     st.header("⚙️ Configuración")
 
     # Selector de modo de operación
