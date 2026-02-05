@@ -465,7 +465,8 @@ def initialize_conversation_chain(
     vector_store, 
     temperature: float = 0.7, 
     max_tokens: int = 2048,
-    session_id: str = None
+    session_id: str = None,
+    chat_history: list = None
 ):
     """Inicializa la cadena de conversación con memoria.
     
@@ -474,6 +475,7 @@ def initialize_conversation_chain(
         temperature: Nivel de creatividad del modelo
         max_tokens: Límite de tokens en la respuesta
         session_id: ID de sesión para cargar hechos del usuario
+        chat_history: Lista de mensajes previos para poblar la memoria
     
     Returns:
         La chain de conversación configurada
@@ -521,6 +523,14 @@ def initialize_conversation_chain(
             return_messages=True,
             output_key="answer"
         )
+        
+        # Poblar la memoria con el historial guardado si existe
+        if chat_history:
+            for msg in chat_history:
+                if msg.get('role') == 'user':
+                    memory.chat_memory.add_user_message(msg.get('content', ''))
+                elif msg.get('role') == 'assistant':
+                    memory.chat_memory.add_ai_message(msg.get('content', ''))
         
         # Obtener hechos del usuario si hay session_id
         user_facts_section = ""

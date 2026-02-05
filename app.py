@@ -579,7 +579,9 @@ with st.sidebar:
                 st.session_state.conversation_chain = initialize_conversation_chain(
                     vector_store=st.session_state.vector_store,
                     temperature=temperature,
-                    max_tokens=max_tokens
+                    max_tokens=max_tokens,
+                    session_id=st.session_state.session_id,
+                    chat_history=st.session_state.messages
                 )
                 if st.session_state.conversation_chain:
                     st.success("Parámetros aplicados correctamente!")
@@ -604,7 +606,8 @@ else:
                 vector_store=st.session_state.vector_store,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                session_id=st.session_state.session_id
+                session_id=st.session_state.session_id,
+                chat_history=st.session_state.messages
             )
     
     if st.session_state.conversation_chain:
