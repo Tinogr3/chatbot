@@ -28,7 +28,7 @@ def get_flash_model(temperature: float = 0.1):
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
             return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash-exp",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.5-pro",
                 temperature=temperature,
                 max_output_tokens=256,
                 api_key=api_key
@@ -37,7 +37,7 @@ def get_flash_model(temperature: float = 0.1):
         credentials, project_id = get_credentials_and_project()
         if credentials and project_id:
             return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash-exp",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.5-pro",
                 temperature=temperature,
                 max_output_tokens=256,
                 vertexai=True,
@@ -67,7 +67,7 @@ def route_query(query: str) -> str:
     classification_prompt = f"""Clasifica la siguiente consulta del usuario en UNA de estas categorías:
 
 CATEGORÍAS:
-- CONVERSACION: Saludos, despedidas, charla casual, preguntas personales al asistente, agradecimientos
+- CONVERSACION: Saludos, despedidas, charla casual, preguntas personales al asistente, agradecimientos. Incluye cuando el usuario da información sobre sí mismo (ej: "me llamo X", "trabajo en Y", "soy de Z") o da instrucciones sobre cómo comportarse.
 - PREGUNTA_DOCUMENTO: Preguntas específicas que requieren buscar información en documentos
 - RESUMEN: Solicitudes de resumir, sintetizar o dar una visión general del contenido
 - APRENDIZAJE: El usuario quiere aprender, estudiar, practicar, hacer ejercicios o que le enseñen un tema
