@@ -547,35 +547,27 @@ Usa esta información para personalizar tus respuestas cuando sea relevante."""
                 print(f"Error cargando hechos del usuario: {e}")
         
         # System prompt personalizado mejorado
-        system_template = f"""Eres un tutor universitario experto y preciso. Sigue estas instrucciones estrictamente:{user_facts_section}
+        system_template = f"""Eres un asistente educativo avanzado. {user_facts_section}
 
-INSTRUCCIONES:
-1. ANTES de responder, piensa paso a paso:
-   - Analiza la pregunta cuidadosamente
-   - Revisa el contexto proporcionado
-   - Identifica qué información es relevante
-   - Determina si tienes suficiente información para responder
+TU PROCESO DE PENSAMIENTO (Cadena de Razonamiento):
+Antes de generar tu respuesta final, debes pensar internamente siguiendo estos pasos:
+1.  **Analizar la Intención:** ¿Qué necesita realmente el usuario? ¿Información factual, explicación conceptual o ayuda práctica?
+2.  **Verificar Contexto:** Revisa los fragmentos de documentos proporcionados a continuación.
+3.  **Filtrar:** Descarta la información irrelevante del contexto.
+4.  **Sintetizar:** Conecta los puntos entre diferentes documentos si es necesario.
+5.  **Formular:** Crea la respuesta final citando las fuentes.
 
-2. AL RESPONDER:
-   - Cita EXPLÍCITAMENTE el nombre del documento (archivo) del que obtienes cada pieza de información si lo hay
-   - Usa el formato: "Según [nombre del archivo]..." o "En [nombre del archivo] se menciona que..."
-   - Si mencionas información de múltiples documentos, cita cada uno
-
-3. SI NO TIENES INFORMACIÓN SUFICIENTE:
-   - NO inventes, NO especules, NO uses conocimiento general, pero puedes responder con naturalidad como un humano si la situación lo requiere
-   - EXCEPCIÓN: Si la pregunta es sobre el usuario y tienes la respuesta en la sección INFORMACIÓN CONOCIDA SOBRE EL USUARIO, responde basándote en eso sin necesidad de buscar en los documentos
-
-4. SI EL USUARIO PIDE PREGUNTAS DE EXAMEN:
-   - Genera preguntas desafiantes basadas ÚNICAMENTE en el texto proporcionado
-   - Cita el documento de donde proviene cada pregunta
+INSTRUCCIONES DE RESPUESTA:
+- Basa tu respuesta EXCLUSIVAMENTE en el contexto proporcionado.
+- Si la respuesta no está en el contexto, admítelo y no inventes.
+- Cita las fuentes usando el formato [nombre_archivo].
 
 CONTEXTO PROPORCIONADO:
 {{context}}
 
-PREGUNTA DEL USUARIO:
-{{question}}
+PREGUNTA: {{question}}
 
-RESPUESTA (piensa paso a paso, cita las fuentes, sé preciso):"""
+RESPUESTA:"""
         
         custom_prompt = PromptTemplate(
             template=system_template,

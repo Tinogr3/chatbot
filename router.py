@@ -22,7 +22,7 @@ class QueryCategory(Enum):
     OTRO = "OTRO"
 
 
-def get_flash_model(temperature: float = 0.1):
+def get_model(temperature: float = 0.7):
     """Obtiene el modelo Gemini Flash para clasificación rápida."""
     try:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
@@ -59,7 +59,7 @@ def route_query(query: str) -> str:
     Returns:
         Categoría de la query: CONVERSACION, PREGUNTA_DOCUMENTO, RESUMEN, APRENDIZAJE, OTRO
     """
-    llm = get_flash_model(temperature=0.0)
+    llm = get_model(temperature=0.1)
     if not llm:
         # Si no hay modelo, asumir pregunta de documento por defecto
         return QueryCategory.PREGUNTA_DOCUMENTO.value
@@ -116,7 +116,7 @@ def get_direct_response(query: str, session_id: str = None, user_facts: str = ""
     Returns:
         Respuesta generada.
     """
-    llm = get_flash_model(temperature=0.7)
+    llm = get_model(temperature=0.7)
     if not llm:
         return "Lo siento, no puedo responder en este momento."
     
@@ -155,7 +155,7 @@ def get_summary_response(query: str, vector_store, session_id: str = None) -> Di
     Returns:
         Diccionario con 'answer' y 'source_documents'.
     """
-    llm = get_flash_model(temperature=0.3)
+    llm = get_model(temperature=0.3)
     if not llm:
         return {"answer": "No puedo generar el resumen en este momento.", "source_documents": []}
     
@@ -213,7 +213,7 @@ class LearningFlowManager:
     def __init__(self, vector_store, session_id: str = None):
         self.vector_store = vector_store
         self.session_id = session_id
-        self.llm = get_flash_model(temperature=0.5)
+        self.llm = get_model(temperature=0.3)
     
     def start_learning_session(self, topic_query: str) -> Dict[str, Any]:
         """
@@ -258,31 +258,27 @@ class LearningFlowManager:
             
             context = "\n\n".join(context_parts)
             
-            lesson_prompt = f"""Eres un tutor experto. Basándote en el siguiente contenido, crea una lección educativa.
+            lesson_prompt = f"""Actúa como un Tutor Socrático experto (Método de Aprendizaje Guiado).
+Tu objetivo NO es dar una clase magistral, sino guiar al estudiante para que descubra el conocimiento.
 
-CONTENIDO DISPONIBLE:
+CONTENIDO DE REFERENCIA:
 {context}
 
-SOLICITUD DEL ESTUDIANTE: {topic_query}
+TEMA SOLICITADO: {topic_query}
 
-INSTRUCCIONES:
-1. Identifica el tema principal y subtemas
-2. Presenta una explicación clara y didáctica del primer concepto importante
-3. Usa ejemplos cuando sea posible
-4. Al final, genera UNA pregunta de comprensión para verificar el entendimiento
-5. La pregunta debe tener una respuesta clara basada en el contenido
+INSTRUCCIONES ESTRICTAS:
+1. NO escribas parrafadas largas. Sé breve y conversacional.
+2. Introduce el concepto más básico del tema solicitado muy brevemente.
+3. Inmediatamente después, formula una pregunta de reflexión o un pequeño desafío para que el estudiante piense.
+4. NUNCA des la respuesta completa de inmediato. Espera a que el estudiante intente responder.
 
 FORMATO DE RESPUESTA:
-## 📚 [Título del tema]
+(Saludo breve y motivador)
 
-[Explicación del concepto]
+(Breve introducción al concepto - Máximo 2 frases)
 
----
-
-### ❓ Pregunta de comprensión:
-[Tu pregunta aquí]
-
-*(Responde a la pregunta para continuar con la lección)*"""
+(Pregunta guía o escenario práctico para que el usuario resuelva)
+"""
 
             response = self.llm.invoke(lesson_prompt)
             
@@ -340,29 +336,28 @@ FORMATO DE RESPUESTA:
                 context_parts.append(doc.page_content)
             context = "\n\n".join(context_parts)
             
-            eval_prompt = f"""Eres un tutor evaluando la respuesta de un estudiante.
+            eval_prompt = f"""Eres un Tutor Socrático evaluando a un estudiante.
 
-CONTEXTO/LECCIÓN ANTERIOR:
-{previous_content}
+CONTEXTO PREVIO: {previous_content}
+MATERIAL DE REFERENCIA: {context}
+RESPUESTA DEL ESTUDIANTE: {user_answer}
 
-MATERIAL DE REFERENCIA:
-{context}
-
-RESPUESTA DEL ESTUDIANTE:
-{user_answer}
-
-INSTRUCCIONES:
-1. Evalúa si la respuesta es correcta, parcialmente correcta o incorrecta
-2. Si es CORRECTA: Felicita al estudiante y presenta el siguiente concepto del tema con una nueva pregunta
-3. Si es INCORRECTA o PARCIAL: Explica amablemente el error, refuerza el concepto con más detalle y haz la misma pregunta reformulada
+INSTRUCCIONES DE EVALUACIÓN:
+1. Analiza la lógica del estudiante.
+2. Si la respuesta es INCORRECTA:
+   - NO le des la solución correcta.
+   - Identifica dónde falló su lógica.
+   - Dale una pista o hazle una pregunta más sencilla que le ayude a darse cuenta de su error.
+3. Si la respuesta es CORRECTA:
+   - Felicítalo brevemente.
+   - Profundiza un poco más en el tema o pasa al siguiente concepto lógico.
+   - Haz una nueva pregunta para seguir avanzando (Scaffolding).
 
 FORMATO:
-- Empieza con ✅ si es correcta, ⚠️ si es parcial, o ❌ si es incorrecta
-- Proporciona retroalimentación constructiva
-- Incluye el siguiente paso (nuevo concepto o refuerzo)
-- Termina con una pregunta para continuar
-
-RESPUESTA:"""
+- Empieza con un emoji de estado (✅, ⚠️, o ❌).
+- Feedback constructivo (sin dar la solución si falló).
+- Nueva pregunta o reto.
+"""
 
             response = self.llm.invoke(eval_prompt)
             content = response.content.strip()
