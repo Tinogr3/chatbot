@@ -29,3 +29,5 @@ openai-whisper>=20231117
 
 # Utilities
 tiktoken>=0.5.1
+
+langgraph>=0.0.10

@@ -368,6 +368,14 @@ def procesar_pdf(ruta_archivo: str, extract_images: bool = True) -> List:
             if "document_registry" not in st.session_state:
                 st.session_state.document_registry = {}
             st.session_state.document_registry[nombre_archivo] = document_card
+            
+            # Persistir el registro completo en disco
+            try:
+                with open('document_registry.json', 'w', encoding='utf-8') as f:
+                    json.dump(st.session_state.document_registry, f, ensure_ascii=False, indent=2)
+                print(f"[Registry] Guardado document_registry.json ({len(st.session_state.document_registry)} documentos)")
+            except IOError as e:
+                print(f"[Registry] Error guardando document_registry.json: {e}")
         else:
             st.warning("⚠️ No se pudo generar la Document Card. Continuando sin metadatos agénticos.")
 

@@ -5,6 +5,7 @@ Interfaz de usuario que coordina los módulos de configuración, RAG y GCS.
 import os
 import tempfile
 import uuid
+import json
 
 import streamlit as st
 
@@ -152,7 +153,18 @@ if "videos_procesados" not in st.session_state:
     st.session_state.videos_procesados = []
 
 if "document_registry" not in st.session_state:
-    st.session_state.document_registry = {}
+    # Intentar cargar desde archivo persistido
+    registry_path = "document_registry.json"
+    try:
+        if os.path.exists(registry_path):
+            with open(registry_path, 'r', encoding='utf-8') as f:
+                st.session_state.document_registry = json.load(f)
+                print(f"[Registry] Cargado document_registry con {len(st.session_state.document_registry)} documentos")
+        else:
+            st.session_state.document_registry = {}
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"[Registry] Error cargando document_registry.json: {e}")
+        st.session_state.document_registry = {}
 
 # Variables para modo aprendizaje
 if "learning_mode" not in st.session_state:
@@ -559,6 +571,14 @@ with st.sidebar:
         st.session_state.videos_procesados = []
         st.session_state.archivo_activo = None
         st.session_state.document_registry = {}
+        
+        # Eliminar archivo de registro persistido
+        try:
+            if os.path.exists('document_registry.json'):
+                os.remove('document_registry.json')
+                print("[Registry] Eliminado document_registry.json")
+        except OSError as e:
+            print(f"[Registry] Error eliminando document_registry.json: {e}")
         
         # Nota: El historial se elimina de la base de datos SQLite
         
