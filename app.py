@@ -17,6 +17,7 @@ from config import BUCKET_NAME
 from rag_engine import (
     initialize_vector_store,
     initialize_conversation_chain,
+    initialize_agent,
     procesar_pdf
 )
 from gcs_utils import (
@@ -129,6 +130,9 @@ if "vector_store" not in st.session_state:
 if "conversation_chain" not in st.session_state:
     st.session_state.conversation_chain = None
 
+if "agent" not in st.session_state:
+    st.session_state.agent = None
+
 if "processed_files" not in st.session_state:
     st.session_state.processed_files = []
 
@@ -146,6 +150,9 @@ if "archivos_nube" not in st.session_state:
 
 if "videos_procesados" not in st.session_state:
     st.session_state.videos_procesados = []
+
+if "document_registry" not in st.session_state:
+    st.session_state.document_registry = {}
 
 # Variables para modo aprendizaje
 if "learning_mode" not in st.session_state:
@@ -168,6 +175,7 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.vector_store = None
         st.session_state.conversation_chain = None
+        st.session_state.agent = None
         st.rerun()
     
     st.divider()
@@ -245,6 +253,7 @@ with st.sidebar:
         st.session_state.modo_operacion = modo_operacion
         st.session_state.vector_store = None
         st.session_state.conversation_chain = None
+        st.session_state.agent = None
         # Limpiar historial en memoria y en base de datos
         chat_manager.delete_history(st.session_state.session_id)
         st.session_state.messages = []
@@ -276,8 +285,9 @@ with st.sidebar:
                         st.success(f"✅ {len(filenames)} archivos cargados desde la nube.")
                         st.info(f"Se generaron {len(documents)} chunks con embeddings.")
                         
-                        # Reinicializar la cadena de conversación
+                        # Reinicializar la cadena de conversación y agente
                         st.session_state.conversation_chain = None
+                        st.session_state.agent = None
                         st.rerun()
                     else:
                         st.error("Error al crear el vector store.")
@@ -344,9 +354,10 @@ with st.sidebar:
                                 st.success(f"✅ Archivo '{filename}' cargado y listo para chatear.")
                                 st.info(f"Se generaron {len(documents)} chunks con embeddings.")
 
-                                # Reinicializar la cadena de conversación si existe
-                                if st.session_state.conversation_chain:
+                                # Reinicializar la cadena de conversación y agente si existen
+                                if st.session_state.conversation_chain or st.session_state.agent:
                                     st.session_state.conversation_chain = None
+                                    st.session_state.agent = None
                                     st.info("Reinicia el chat para usar el nuevo documento.")
                             else:
                                 st.error("Error al crear el vector store.")
@@ -385,8 +396,9 @@ with st.sidebar:
                         # Actualizar lista de archivos procesados
                         st.session_state.processed_files = st.session_state.archivos_nube.copy() + st.session_state.archivos_manuales.copy()
                         
-                        # Reinicializar la cadena de conversación
+                        # Reinicializar la cadena de conversación y agente
                         st.session_state.conversation_chain = None
+                        st.session_state.agent = None
                         st.rerun()
                     else:
                         st.error("Error al crear el vector store.")
@@ -450,9 +462,10 @@ with st.sidebar:
                                 st.success(f"✅ Archivo '{filename}' cargado y listo para chatear.")
                                 st.info(f"Se generaron {len(documents)} chunks con embeddings.")
 
-                                # Reinicializar la cadena de conversación si existe
-                                if st.session_state.conversation_chain:
+                                # Reinicializar la cadena de conversación y agente si existen
+                                if st.session_state.conversation_chain or st.session_state.agent:
                                     st.session_state.conversation_chain = None
+                                    st.session_state.agent = None
                                     st.info("Reinicia el chat para usar el nuevo documento.")
                             else:
                                 st.error("Error al crear el vector store.")
@@ -504,8 +517,9 @@ with st.sidebar:
                                 st.success(f"✅ Video procesado correctamente.")
                                 st.info(f"Se generaron {len(documents)} chunks con timestamps.")
                                 
-                                # Reinicializar la cadena de conversación
+                                # Reinicializar la cadena de conversación y agente
                                 st.session_state.conversation_chain = None
+                                st.session_state.agent = None
                             else:
                                 st.error("Error al agregar video al vector store.")
                         else:
@@ -533,9 +547,10 @@ with st.sidebar:
         chat_manager.delete_history(st.session_state.session_id)
         st.session_state.messages = []
         
-        # Limpiar el vector store y la cadena de conversación
+        # Limpiar el vector store, la cadena de conversación y el agente
         st.session_state.vector_store = None
         st.session_state.conversation_chain = None
+        st.session_state.agent = None
         
         # Limpiar archivos procesados
         st.session_state.processed_files = []
@@ -543,6 +558,7 @@ with st.sidebar:
         st.session_state.archivos_nube = []
         st.session_state.videos_procesados = []
         st.session_state.archivo_activo = None
+        st.session_state.document_registry = {}
         
         # Nota: El historial se elimina de la base de datos SQLite
         
@@ -575,15 +591,17 @@ with st.sidebar:
     # Botón para aplicar cambios
     if st.button("🔄 Aplicar Parámetros"):
         if st.session_state.vector_store:
-            with st.spinner("Reinicializando modelo con nuevos parámetros..."):
-                st.session_state.conversation_chain = initialize_conversation_chain(
+            with st.spinner("Reinicializando agente con nuevos parámetros..."):
+                st.session_state.agent = initialize_agent(
                     vector_store=st.session_state.vector_store,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     session_id=st.session_state.session_id,
-                    chat_history=st.session_state.messages
+                    chat_history=st.session_state.messages,
+                    document_registry=st.session_state.document_registry
                 )
-                if st.session_state.conversation_chain:
+                st.session_state.conversation_chain = None
+                if st.session_state.agent:
                     st.success("Parámetros aplicados correctamente!")
                 else:
                     st.error("Error al aplicar parámetros.")
@@ -599,18 +617,19 @@ st.markdown("---")
 if st.session_state.vector_store is None:
     st.warning("⚠️ Por favor, sube y procesa al menos un documento PDF en la barra lateral para comenzar.")
 else:
-    # Inicializar cadena de conversación si no existe
-    if st.session_state.conversation_chain is None:
-        with st.spinner("Inicializando chatbot..."):
-            st.session_state.conversation_chain = initialize_conversation_chain(
+    # Inicializar agente si no existe
+    if st.session_state.agent is None:
+        with st.spinner("Inicializando agente inteligente..."):
+            st.session_state.agent = initialize_agent(
                 vector_store=st.session_state.vector_store,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 session_id=st.session_state.session_id,
-                chat_history=st.session_state.messages
+                chat_history=st.session_state.messages,
+                document_registry=st.session_state.document_registry
             )
     
-    if st.session_state.conversation_chain:
+    if st.session_state.agent:
         # Mostrar historial de mensajes
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
@@ -667,6 +686,10 @@ else:
                             st.session_state.last_learning_content = answer
                         
                         else:
+                            # Inicializar variables de fuentes
+                            source_documents = []
+                            sources = []
+                            
                             # Clasificar la query con el router
                             category = route_query(prompt)
                             
@@ -705,12 +728,33 @@ else:
                                     st.session_state.last_learning_content = answer
                             
                             else:
-                                # PREGUNTA_DOCUMENTO u OTRO: usar RAG normal
-                                result = st.session_state.conversation_chain.invoke({
-                                    "question": prompt
-                                })
-                                answer = result.get("answer", "No se pudo generar una respuesta.")
-                                source_documents = result.get("source_documents", [])
+                                # PREGUNTA_DOCUMENTO u OTRO: usar Agente con herramientas
+                                from langchain_core.messages import HumanMessage as HMsg
+                                agent_result = st.session_state.agent.invoke(
+                                    {"messages": [HMsg(content=prompt)]}
+                                )
+                                # Extraer la respuesta del último mensaje AI
+                                agent_messages = agent_result.get("messages", [])
+                                answer = "No se pudo generar una respuesta."
+                                for msg in reversed(agent_messages):
+                                    if hasattr(msg, 'content') and msg.type == "ai" and msg.content:
+                                        answer = msg.content
+                                        break
+                                
+                                # Extraer source_documents de los ToolMessages
+                                source_documents = []
+                                for msg in agent_messages:
+                                    if msg.type == "tool" and msg.content:
+                                        # Los retriever tools devuelven documentos como texto
+                                        # Crear Document con metadata para mantener compatibilidad
+                                        from langchain_core.documents import Document as Doc
+                                        # Extraer el source del nombre de la herramienta
+                                        tool_name = getattr(msg, 'name', '')
+                                        source_name = tool_name.replace('search_document_', '').replace('_', ' ') if 'search_document_' in tool_name else 'Todos los documentos'
+                                        source_documents.append(Doc(
+                                            page_content=msg.content,
+                                            metadata={"source": source_name, "type": "text"}
+                                        ))
                         
                         # Mostrar respuesta
                         st.markdown(answer)
@@ -787,7 +831,7 @@ else:
                             error_msg
                         )
     else:
-        st.error("Error al inicializar la cadena de conversación. Verifica la configuración.")
+        st.error("Error al inicializar el agente. Verifica la configuración.")
 
 # Footer
 st.markdown("---")
