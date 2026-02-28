@@ -14,6 +14,7 @@ from typing import List, Dict, Optional
 from contextlib import contextmanager
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+import config as _config
 from config import get_credentials_and_project
 
 
@@ -77,19 +78,19 @@ class UserMemoryManager:
                     return None
                 
                 self._llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.0-flash-exp",
+                    model="gemini-3-flash-preview",
                     temperature=0.1,  # Baja temperatura para extracción precisa
-                    max_output_tokens=1024,
+                    max_output_tokens=_config.USER_MAX_OUTPUT_TOKENS,
                     api_key=api_key
                 )
             else:
                 self._llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.0-flash-exp",
+                    model="gemini-3-flash-preview",
                     temperature=0.1,
-                    max_output_tokens=1024,
+                    max_output_tokens=_config.USER_MAX_OUTPUT_TOKENS,
                     vertexai=True,
                     project=project_id,
-                    location="us-central1"
+                    location="global",
                 )
         
         return self._llm
@@ -141,7 +142,26 @@ RESPUESTA JSON:"""
 
         try:
             response = llm.invoke(extraction_prompt)
-            content = response.content.strip()
+            # #region agent log
+            try:
+                import json as _json
+                _log_path = "/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log"
+                _content = response.content
+                with open(_log_path, "a") as _f:
+                    _f.write(_json.dumps({"sessionId": "c40eac", "location": "user_memory.py:extract_user_facts", "message": "response.content before assign", "data": {"content_type": type(_content).__name__, "content_repr": repr(_content)[:400]}, "hypothesisId": "H3", "timestamp": __import__("time").time() * 1000}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            if isinstance(response.content, list):
+                text_parts = []
+                for item in response.content:
+                    if isinstance(item, dict) and "text" in item:
+                        text_parts.append(item["text"])
+                    elif isinstance(item, str):
+                        text_parts.append(item)
+                content = "".join(text_parts).strip()
+            else:
+                content = str(response.content).strip()
             
             # DEBUG: Log raw response
             print(f"DEBUG JSON RAW: {content}")
@@ -165,7 +185,32 @@ RESPUESTA JSON:"""
             if not content or content == "[]":
                 return []
             
-            facts = json.loads(content)
+            # Intentar parsear; si el modelo devuelve JSON truncado o mal formado, intentar reparar
+            facts = None
+            try:
+                facts = json.loads(content)
+            except json.JSONDecodeError:
+                facts = None
+                # Quitar comas finales antes de ] o } (frecuente en respuestas del modelo)
+                repaired = re.sub(r',\s*([}\]])', r'\1', content)
+                try:
+                    facts = json.loads(repaired)
+                except json.JSONDecodeError:
+                    # Si parece truncado (falta cierre de array), intentar cerrar
+                    trimmed = content.rstrip()
+                    if trimmed.endswith("}") and "]" not in trimmed[trimmed.rfind("}"):]:
+                        try:
+                            facts = json.loads(trimmed + "]")
+                        except json.JSONDecodeError:
+                            pass
+                    if facts is None:
+                        # Extraer objetos completos {\"tipo\": ..., \"valor\": ..., \"confianza\": ...}
+                        objs = re.findall(r'\{\s*"tipo"\s*:\s*"([^"]*)"\s*,\s*"valor"\s*:\s*"([^"]*)"\s*(?:,\s*"confianza"\s*:\s*([\d.]+))?\s*\}', content)
+                        if objs:
+                            facts = [{"tipo": g[0], "valor": g[1], "confianza": float(g[2]) if g[2] else 0.8} for g in objs]
+            
+            if not facts or not isinstance(facts, list):
+                return []
             
             # Validar estructura de los hechos
             validated_facts = []

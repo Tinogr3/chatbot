@@ -15,7 +15,7 @@ import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_classic.chains import ConversationalRetrievalChain
 from langchain_classic.memory import ConversationBufferMemory
 from langchain_core.prompts import PromptTemplate
@@ -24,8 +24,22 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools.retriever import create_retriever_tool
 from langgraph.prebuilt import create_react_agent
 
+import config as _config
 from config import get_credentials_and_project
 from user_memory import UserMemoryManager
+
+
+def extract_text(content):
+    """Convierte content de respuesta Gemini (str o lista de bloques) a string."""
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict) and "text" in item:
+                text_parts.append(item["text"])
+            elif isinstance(item, str):
+                text_parts.append(item)
+        return "".join(text_parts)
+    return str(content) if content is not None else ""
 
 
 def get_gemini_vision_model():
@@ -34,20 +48,21 @@ def get_gemini_vision_model():
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
             return ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro",
+                model="gemini-3-pro-preview",
                 google_api_key=api_key,
                 temperature=1,
-                max_tokens=16384
+                max_tokens=_config.USER_MAX_OUTPUT_TOKENS
             )
         
         credentials, project_id = get_credentials_and_project()
         if credentials and project_id:
             return ChatGoogleGenerativeAI(
-                model="gemini-2.5-pro",
+                model="gemini-3-pro-preview",
                 credentials=credentials,
                 project=project_id,
+                location="global",
                 temperature=1,
-                max_tokens=16384
+                max_tokens=_config.USER_MAX_OUTPUT_TOKENS
             )
     except Exception as e:
         print(f"Error inicializando modelo de visión: {e}")
@@ -100,7 +115,7 @@ Responde en español con una descripción clara y concisa."""
         )
         
         response = model.invoke([message])
-        return response.content.strip()
+        return extract_text(response.content).strip()
         
     except Exception as e:
         print(f"Error describiendo imagen: {e}")
@@ -204,7 +219,7 @@ def get_embeddings():
             model="text-embedding-004",
             vertexai=True,
             project=project_id,
-            location="us-central1"
+            location="global",
         )
     except Exception as e:
         st.error(f"Error al inicializar embeddings: {str(e)}")
@@ -278,7 +293,7 @@ Recuerda: responde SOLO con el JSON válido, sin ningún texto adicional."""
 
         if api_key:
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model="gemini-3-flash-preview",
                 google_api_key=api_key,
                 temperature=0,
             )
@@ -288,9 +303,10 @@ Recuerda: responde SOLO con el JSON válido, sin ningún texto adicional."""
                 print("[DocumentCard] No se encontraron credenciales.")
                 return {}
             llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model="gemini-3-flash-preview",
                 credentials=credentials,
                 project=project_id,
+                location="global",
                 temperature=0,
             )
 
@@ -298,7 +314,7 @@ Recuerda: responde SOLO con el JSON válido, sin ningún texto adicional."""
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 response = llm.invoke(prompt)
-                raw = response.content.strip()
+                raw = extract_text(response.content).strip()
 
                 # Limpiar posible bloque markdown ```json ... ```
                 if raw.startswith("```"):
@@ -675,7 +691,7 @@ def initialize_vector_store(
 def initialize_conversation_chain(
     vector_store, 
     temperature: float = 0.7, 
-    max_tokens: int = 2048,
+    max_tokens: int = None,
     session_id: str = None,
     chat_history: list = None
 ):
@@ -684,13 +700,14 @@ def initialize_conversation_chain(
     Args:
         vector_store: El vector store a usar para retrieval
         temperature: Nivel de creatividad del modelo
-        max_tokens: Límite de tokens en la respuesta
+        max_tokens: Límite de tokens (None = usar config.USER_MAX_OUTPUT_TOKENS)
         session_id: ID de sesión para cargar hechos del usuario
         chat_history: Lista de mensajes previos para poblar la memoria
     
     Returns:
         La chain de conversación configurada
     """
+    out_tokens = max_tokens if max_tokens is not None else _config.USER_MAX_OUTPUT_TOKENS
     try:
         if vector_store is None:
             return None
@@ -710,20 +727,20 @@ def initialize_conversation_chain(
                 return None
             
             llm = ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.5-pro",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
-                max_output_tokens=max_tokens,
+                max_output_tokens=out_tokens,
                 api_key=api_key
             )
         else:
             # Usar Vertex AI con credenciales de servicio
             llm = ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.5-pro",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
-                max_output_tokens=max_tokens,
+                max_output_tokens=out_tokens,
                 vertexai=True,
                 project=project_id,
-                location="us-central1"
+                location="global",
             )
         
         # Configurar memoria para mantener el historial de conversación
@@ -853,19 +870,19 @@ def initialize_agent(
                 return None
 
             llm = ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.5-pro",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
                 max_output_tokens=max_tokens,
                 api_key=api_key
             )
         else:
             llm = ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.5-pro",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
                 max_output_tokens=max_tokens,
                 vertexai=True,
                 project=project_id,
-                location="us-central1"
+                location="global",
             )
 
         # === 2. Construir herramientas por documento ===

@@ -31,3 +31,5 @@ openai-whisper>=20231117
 tiktoken>=0.5.1
 
 langgraph>=0.0.10
+
+langchain-chroma>=0.1.2

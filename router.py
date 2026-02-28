@@ -10,7 +10,20 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
 
+import config as _config
 from config import get_credentials_and_project
+
+
+def extract_text(content):
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict) and "text" in item:
+                text_parts.append(item["text"])
+            elif isinstance(item, str):
+                text_parts.append(item)
+        return "".join(text_parts)
+    return str(content)
 
 
 class QueryCategory(Enum):
@@ -22,27 +35,28 @@ class QueryCategory(Enum):
     OTRO = "OTRO"
 
 
-def get_model(temperature: float = 0.7):
-    """Obtiene el modelo Gemini Flash para clasificación rápida."""
+def get_model(temperature: float = 0.7, max_output_tokens: int = None):
+    """Obtiene el modelo Gemini. Si max_output_tokens es None, usa config.USER_MAX_OUTPUT_TOKENS (slider)."""
+    out_tokens = max_output_tokens if max_output_tokens is not None else _config.USER_MAX_OUTPUT_TOKENS
     try:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
             return ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.5-pro",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
-                max_output_tokens=256,
+                max_output_tokens=out_tokens,
                 api_key=api_key
             )
         
         credentials, project_id = get_credentials_and_project()
         if credentials and project_id:
             return ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-2.5-pro",
+                model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
-                max_output_tokens=256,
+                max_output_tokens=out_tokens,
                 vertexai=True,
                 project=project_id,
-                location="us-central1"
+                location="global",
             )
     except Exception as e:
         print(f"Error inicializando modelo Flash: {e}")
@@ -84,7 +98,7 @@ CATEGORÍA:"""
 
     try:
         response = llm.invoke(classification_prompt)
-        category = response.content.strip().upper()
+        category = extract_text(response.content).strip().upper()
         
         # Validar que sea una categoría válida
         valid_categories = [c.value for c in QueryCategory]
@@ -138,7 +152,7 @@ RESPUESTA:"""
 
     try:
         response = llm.invoke(prompt)
-        return response.content.strip()
+        return extract_text(response.content).strip()
     except Exception as e:
         return f"Error al generar respuesta: {str(e)}"
 
@@ -196,7 +210,7 @@ RESUMEN ESTRUCTURADO:"""
         response = llm.invoke(summary_prompt)
         
         return {
-            "answer": response.content.strip(),
+            "answer": extract_text(response.content).strip(),
             "source_documents": docs
         }
         
@@ -283,7 +297,7 @@ FORMATO DE RESPUESTA:
             response = self.llm.invoke(lesson_prompt)
             
             return {
-                "content": response.content.strip(),
+                "content": extract_text(response.content).strip(),
                 "is_learning_mode": True,
                 "awaiting_answer": True,
                 "topic": topic_query,
@@ -360,7 +374,7 @@ FORMATO:
 """
 
             response = self.llm.invoke(eval_prompt)
-            content = response.content.strip()
+            content = extract_text(response.content).strip()
             
             # Determinar si fue correcta basándose en el emoji
             is_correct = content.startswith("✅")

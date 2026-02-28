@@ -51,6 +51,28 @@ st.set_page_config(
 chat_manager = ChatHistoryManager()
 user_memory = UserMemoryManager()
 
+def _message_content_to_str(content) -> str:
+    """Convierte el content de un AIMessage a string (puede ser str o lista de bloques)."""
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict):
+                if "text" in item:
+                    text_parts.append(item["text"])
+                elif "parts" in item:
+                    for p in item["parts"] if isinstance(item["parts"], list) else []:
+                        if isinstance(p, str):
+                            text_parts.append(p)
+                        elif isinstance(p, dict) and "text" in p:
+                            text_parts.append(p["text"])
+            elif isinstance(item, str):
+                text_parts.append(item)
+        return "".join(text_parts)
+    return str(content)
+
+
 # Verificar si el usuario ya inició sesión
 if "session_id" not in st.session_state:
     st.session_state.session_id = None
@@ -142,6 +164,12 @@ if "archivo_activo" not in st.session_state:
 
 if "modo_operacion" not in st.session_state:
     st.session_state.modo_operacion = "Nube Automático"
+
+if "max_tokens" not in st.session_state:
+    st.session_state.max_tokens = 65535
+# Sincronizar límite de tokens con config para router/rag/user_memory (por si el sidebar no ha corrido aún)
+import config as _app_config
+_app_config.USER_MAX_OUTPUT_TOKENS = st.session_state.get("max_tokens", 65535)
 
 if "archivos_manuales" not in st.session_state:
     st.session_state.archivos_manuales = []
@@ -603,11 +631,15 @@ with st.sidebar:
         "Límite de Tokens",
         min_value=256,
         max_value=65535,
-        value=65535,
+        value=st.session_state.get("max_tokens", 65535),
         step=256,
         help="Número máximo de tokens en la respuesta"
     )
-    
+    st.session_state["max_tokens"] = max_tokens
+    # Actualizar config para que router/rag_engine/user_memory usen este valor
+    import config as _config
+    _config.USER_MAX_OUTPUT_TOKENS = max_tokens
+
     # Botón para aplicar cambios
     if st.button("🔄 Aplicar Parámetros"):
         if st.session_state.vector_store:
@@ -712,7 +744,14 @@ else:
                             
                             # Clasificar la query con el router
                             category = route_query(prompt)
-                            
+                            # #region agent log
+                            try:
+                                import json as _json
+                                with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
+                                    _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:route_query_result", "message": "category after router", "data": {"category": category, "prompt_prefix": (prompt or "")[:80]}, "hypothesisId": "path", "timestamp": __import__("time").time() * 1000}) + "\n")
+                            except Exception:
+                                pass
+                            # #endregion
                             if category == QueryCategory.CONVERSACION.value:
                                 # Respuesta directa sin RAG
                                 user_facts = user_memory.get_user_facts_formatted(st.session_state.session_id)
@@ -749,17 +788,42 @@ else:
                             
                             else:
                                 # PREGUNTA_DOCUMENTO u OTRO: usar Agente con herramientas
+                                # #region agent log
+                                try:
+                                    import json as _json
+                                    with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
+                                        _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:agent_branch_enter", "message": "entering agent branch", "data": {}, "hypothesisId": "path", "timestamp": __import__("time").time() * 1000}) + "\n")
+                                except Exception:
+                                    pass
+                                # #endregion
                                 from langchain_core.messages import HumanMessage as HMsg
                                 agent_result = st.session_state.agent.invoke(
                                     {"messages": [HMsg(content=prompt)]}
                                 )
                                 # Extraer la respuesta del último mensaje AI
                                 agent_messages = agent_result.get("messages", [])
+                                # #region agent log
+                                try:
+                                    import json as _json
+                                    _log_path = "/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log"
+                                    _msg_summary = [{"type": getattr(m, "type", None), "content_type": type(getattr(m, "content", None)).__name__, "content_repr": repr(getattr(m, "content", None))[:280]} for m in agent_messages]
+                                    with open(_log_path, "a") as _f:
+                                        _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:agent_messages", "message": "agent result messages", "data": {"n": len(agent_messages), "messages": _msg_summary}, "hypothesisId": "H2/H5", "timestamp": __import__("time").time() * 1000}) + "\n")
+                                except Exception:
+                                    pass
+                                # #endregion
                                 answer = "No se pudo generar una respuesta."
                                 for msg in reversed(agent_messages):
                                     if hasattr(msg, 'content') and msg.type == "ai" and msg.content:
-                                        answer = msg.content
+                                        answer = _message_content_to_str(msg.content)
                                         break
+                                # #region agent log
+                                try:
+                                    with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
+                                        _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:answer_after_extract", "message": "answer after extraction", "data": {"len": len(answer), "prefix": answer[:120] if answer else ""}, "hypothesisId": "H1", "timestamp": __import__("time").time() * 1000}) + "\n")
+                                except Exception:
+                                    pass
+                                # #endregion
                                 
                                 # Extraer source_documents de los ToolMessages
                                 source_documents = []
@@ -839,6 +903,14 @@ else:
                         st.toast('🧠 Analizando memoria...', icon='💾')
                     
                     except Exception as e:
+                        # #region agent log
+                        try:
+                            import json as _json
+                            with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
+                                _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:except", "message": "exception in agent flow", "data": {"type": type(e).__name__, "msg": str(e)[:200]}, "hypothesisId": "H4", "timestamp": __import__("time").time() * 1000}) + "\n")
+                        except Exception:
+                            pass
+                        # #endregion
                         error_msg = f"Error al generar respuesta: {str(e)}"
                         st.error(error_msg)
                         st.session_state.messages.append({
