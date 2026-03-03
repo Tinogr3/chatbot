@@ -1,3 +1,41 @@
-source venv/bin/activate
+# Cómo arrancar la aplicación (backend + frontend)
 
-streamlit run app.py (arranque)
+## Opción rápida: un solo comando
+
+Desde la raíz del proyecto:
+
+  ./run.sh
+
+Arranca el backend en segundo plano y el frontend; al salir (Ctrl+C) se detienen ambos.
+Puertos por defecto: backend 8000, frontend 8501. Para cambiar: BACKEND_PORT=9000 STREAMLIT_SERVER_PORT=8502 ./run.sh
+
+## Opción con dos terminales
+
+### 1. Activar entorno e instalar dependencias (una sola vez)
+
+  source venv/bin/activate
+  pip install -r backend/requirements.txt
+  pip install -r frontend/requirements.txt
+
+### 2. Arrancar el backend (Terminal 1)
+
+Desde la raíz del proyecto:
+
+  source venv/bin/activate
+  uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+Comprobar: http://localhost:8000/health → {"status":"ok"}
+
+### 3. Arrancar el frontend (Terminal 2)
+
+  source venv/bin/activate
+  cd frontend
+  streamlit run app.py
+
+Abrir en el navegador la URL que muestre Streamlit (por defecto http://localhost:8501).
+
+## Opcional
+
+- BACKEND_URL: si el backend está en otra máquina/puerto, en la terminal del frontend:
+  export BACKEND_URL=http://localhost:8000
+- Variables de entorno para el backend: .env en la raíz o GOOGLE_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, BUCKET_NAME (ver backend/config.py).

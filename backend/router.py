@@ -1,19 +1,17 @@
 """
-Smart Router - Sistema de enrutamiento inteligente de queries.
-Clasifica la intención del usuario y dirige al flujo de procesamiento adecuado.
+Smart Router - Sistema de enrutamiento inteligente de queries (backend).
 """
 import os
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, Optional
 from enum import Enum
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
 
 from config import get_credentials_and_project
 
 
-def extract_text(content):
+def extract_text(content) -> str:
     if isinstance(content, list):
         text_parts = []
         for item in content:
@@ -22,11 +20,10 @@ def extract_text(content):
             elif isinstance(item, str):
                 text_parts.append(item)
         return "".join(text_parts)
-    return str(content)
+    return str(content) if content is not None else ""
 
 
 class QueryCategory(Enum):
-    """Categorías de clasificación de queries."""
     CONVERSACION = "CONVERSACION"
     PREGUNTA_DOCUMENTO = "PREGUNTA_DOCUMENTO"
     RESUMEN = "RESUMEN"
@@ -35,7 +32,6 @@ class QueryCategory(Enum):
 
 
 def get_model(temperature: float = 0.7, max_output_tokens: int = 65535):
-    """Obtiene el modelo Gemini. max_output_tokens debe pasarse explícitamente (p. ej. desde st.session_state)."""
     try:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
@@ -45,7 +41,6 @@ def get_model(temperature: float = 0.7, max_output_tokens: int = 65535):
                 max_output_tokens=max_output_tokens,
                 api_key=api_key
             )
-        
         credentials, project_id = get_credentials_and_project()
         if credentials and project_id:
             return ChatGoogleGenerativeAI(
@@ -56,27 +51,15 @@ def get_model(temperature: float = 0.7, max_output_tokens: int = 65535):
                 project=project_id,
                 location="global",
             )
-    except Exception as e:
-        print(f"Error inicializando modelo Flash: {e}")
+    except Exception:
+        pass
     return None
 
 
 def route_query(query: str, max_tokens: int = 65535) -> str:
-    """
-    Clasifica la intención del usuario en una categoría.
-    
-    Args:
-        query: Texto de la consulta del usuario.
-        max_tokens: Límite de tokens para el modelo (p. ej. st.session_state["max_tokens"]).
-    
-    Returns:
-        Categoría de la query: CONVERSACION, PREGUNTA_DOCUMENTO, RESUMEN, APRENDIZAJE, OTRO
-    """
     llm = get_model(temperature=0.1, max_output_tokens=max_tokens)
     if not llm:
-        # Si no hay modelo, asumir pregunta de documento por defecto
         return QueryCategory.PREGUNTA_DOCUMENTO.value
-    
     classification_prompt = f"""Clasifica la siguiente consulta del usuario en UNA de estas categorías:
 
 CATEGORÍAS:
@@ -94,50 +77,25 @@ INSTRUCCIONES:
 - No agregues explicaciones ni texto adicional
 
 CATEGORÍA:"""
-
     try:
         response = llm.invoke(classification_prompt)
         category = extract_text(response.content).strip().upper()
-        
-        # Validar que sea una categoría válida
         valid_categories = [c.value for c in QueryCategory]
         if category in valid_categories:
             return category
-        
-        # Si contiene alguna categoría válida, extraerla
         for valid_cat in valid_categories:
             if valid_cat in category:
                 return valid_cat
-        
-        # Por defecto, asumimos pregunta de documento
         return QueryCategory.PREGUNTA_DOCUMENTO.value
-        
-    except Exception as e:
-        print(f"Error clasificando query: {e}")
+    except Exception:
         return QueryCategory.PREGUNTA_DOCUMENTO.value
 
 
-def get_direct_response(query: str, session_id: str = None, user_facts: str = "", max_tokens: int = 65535) -> str:
-    """
-    Genera una respuesta directa para conversaciones sin usar RAG.
-    
-    Args:
-        query: Consulta del usuario.
-        session_id: ID de sesión del usuario.
-        user_facts: Hechos conocidos del usuario (formateados).
-        max_tokens: Límite de tokens (p. ej. st.session_state["max_tokens"]).
-    
-    Returns:
-        Respuesta generada.
-    """
+def get_direct_response(query: str, session_id: Optional[str] = None, user_facts: str = "", max_tokens: int = 65535) -> str:
     llm = get_model(temperature=0.7, max_output_tokens=max_tokens)
     if not llm:
         return "Lo siento, no puedo responder en este momento."
-    
-    user_context = ""
-    if user_facts:
-        user_context = f"\n\nInformación conocida sobre el usuario:\n{user_facts}\n"
-    
+    user_context = f"\n\nInformación conocida sobre el usuario:\n{user_facts}\n" if user_facts else ""
     prompt = f"""Eres un asistente educativo amigable y servicial.{user_context}
 
 Responde de manera natural y cálida a la siguiente conversación del usuario.
@@ -149,7 +107,6 @@ Si te preguntan qué puedes hacer, menciona que puedes:
 USUARIO: {query}
 
 RESPUESTA:"""
-
     try:
         response = llm.invoke(prompt)
         return extract_text(response.content).strip()
@@ -157,43 +114,20 @@ RESPUESTA:"""
         return f"Error al generar respuesta: {str(e)}"
 
 
-def get_summary_response(query: str, vector_store, session_id: str = None, max_tokens: int = 65535) -> Dict[str, Any]:
-    """
-    Genera un resumen del contenido de los documentos.
-    
-    Args:
-        query: Consulta del usuario.
-        vector_store: Vector store con los documentos.
-        session_id: ID de sesión del usuario.
-        max_tokens: Límite de tokens (p. ej. st.session_state["max_tokens"]).
-    
-    Returns:
-        Diccionario con 'answer' y 'source_documents'.
-    """
+def get_summary_response(query: str, vector_store, session_id: Optional[str] = None, max_tokens: int = 65535) -> Dict[str, Any]:
     llm = get_model(temperature=0.3, max_output_tokens=max_tokens)
     if not llm:
         return {"answer": "No puedo generar el resumen en este momento.", "source_documents": []}
-    
-    # Recuperar más documentos para el resumen
     retriever = vector_store.as_retriever(
         search_type="mmr",
         search_kwargs={"k": 10, "fetch_k": 30, "lambda_mult": 0.7}
     )
-    
     try:
         docs = retriever.invoke(query)
-        
         if not docs:
             return {"answer": "No hay documentos disponibles para resumir.", "source_documents": []}
-        
-        # Construir contexto con todos los documentos
-        context_parts = []
-        for doc in docs:
-            source = doc.metadata.get("source", "Desconocido")
-            context_parts.append(f"[{source}]\n{doc.page_content}")
-        
+        context_parts = [f"[{d.metadata.get('source', 'Desconocido')}]\n{d.page_content}" for d in docs]
         context = "\n\n---\n\n".join(context_parts)
-        
         summary_prompt = f"""Genera un resumen completo y estructurado del siguiente contenido.
 
 CONTENIDO:
@@ -207,73 +141,32 @@ INSTRUCCIONES:
 5. El resumen debe ser comprensivo pero conciso
 
 RESUMEN ESTRUCTURADO:"""
-
         response = llm.invoke(summary_prompt)
-        
-        return {
-            "answer": extract_text(response.content).strip(),
-            "source_documents": docs
-        }
-        
+        return {"answer": extract_text(response.content).strip(), "source_documents": docs}
     except Exception as e:
         return {"answer": f"Error generando resumen: {str(e)}", "source_documents": []}
 
 
 class LearningFlowManager:
-    """
-    Gestor del flujo de aprendizaje interactivo.
-    Mantiene el estado de la sesión de aprendizaje.
-    """
-    
-    def __init__(self, vector_store, session_id: str = None, max_tokens: int = 65535):
+    def __init__(self, vector_store, session_id: Optional[str] = None, max_tokens: int = 65535):
         self.vector_store = vector_store
         self.session_id = session_id
         self.max_tokens = max_tokens
         self.llm = get_model(temperature=0.3, max_output_tokens=max_tokens)
-    
+
     def start_learning_session(self, topic_query: str) -> Dict[str, Any]:
-        """
-        Inicia una nueva sesión de aprendizaje sobre un tema.
-        
-        Args:
-            topic_query: Tema o área que el usuario quiere aprender.
-        
-        Returns:
-            Diccionario con la primera lección y pregunta.
-        """
         if not self.llm:
-            return {
-                "content": "No puedo iniciar la sesión de aprendizaje en este momento.",
-                "question": None,
-                "topic": None,
-                "source_documents": []
-            }
-        
-        # Recuperar documentos relevantes al tema
+            return {"content": "No puedo iniciar la sesión de aprendizaje en este momento.", "question": None, "topic": None, "source_documents": []}
         retriever = self.vector_store.as_retriever(
             search_type="mmr",
             search_kwargs={"k": 8, "fetch_k": 20, "lambda_mult": 0.6}
         )
-        
         try:
             docs = retriever.invoke(topic_query)
-            
             if not docs:
-                return {
-                    "content": "No encontré información sobre ese tema en los documentos. ¿Podrías especificar otro tema?",
-                    "question": None,
-                    "topic": None,
-                    "source_documents": []
-                }
-            
-            # Construir contexto
-            context_parts = []
-            for doc in docs:
-                source = doc.metadata.get("source", "Desconocido")
-                context_parts.append(f"[{source}]\n{doc.page_content}")
-            
+                return {"content": "No encontré información sobre ese tema en los documentos. ¿Podrías especificar otro tema?", "question": None, "topic": None, "source_documents": []}
+            context_parts = [f"[{d.metadata.get('source', 'Desconocido')}]\n{d.page_content}" for d in docs]
             context = "\n\n".join(context_parts)
-            
             lesson_prompt = f"""Actúa como un Tutor Socrático experto (Método de Aprendizaje Guiado).
 Tu objetivo NO es dar una clase magistral, sino guiar al estudiante para que descubra el conocimiento.
 
@@ -295,9 +188,7 @@ FORMATO DE RESPUESTA:
 
 (Pregunta guía o escenario práctico para que el usuario resuelva)
 """
-
             response = self.llm.invoke(lesson_prompt)
-            
             return {
                 "content": extract_text(response.content).strip(),
                 "is_learning_mode": True,
@@ -305,53 +196,16 @@ FORMATO DE RESPUESTA:
                 "topic": topic_query,
                 "source_documents": docs
             }
-            
         except Exception as e:
-            return {
-                "content": f"Error iniciando sesión de aprendizaje: {str(e)}",
-                "question": None,
-                "topic": None,
-                "source_documents": []
-            }
-    
-    def evaluate_answer(
-        self, 
-        user_answer: str, 
-        topic: str,
-        previous_content: str
-    ) -> Dict[str, Any]:
-        """
-        Evalúa la respuesta del usuario y decide si reforzar o avanzar.
-        
-        Args:
-            user_answer: Respuesta del usuario.
-            topic: Tema de aprendizaje actual.
-            previous_content: Contenido de la lección anterior.
-        
-        Returns:
-            Diccionario con retroalimentación y siguiente paso.
-        """
+            return {"content": f"Error iniciando sesión de aprendizaje: {str(e)}", "question": None, "topic": None, "source_documents": []}
+
+    def evaluate_answer(self, user_answer: str, topic: str, previous_content: str) -> Dict[str, Any]:
         if not self.llm:
-            return {
-                "content": "No puedo evaluar la respuesta en este momento.",
-                "is_correct": False,
-                "source_documents": []
-            }
-        
-        # Recuperar más contexto sobre el tema
-        retriever = self.vector_store.as_retriever(
-            search_type="mmr",
-            search_kwargs={"k": 6, "fetch_k": 15}
-        )
-        
+            return {"content": "No puedo evaluar la respuesta en este momento.", "is_correct": False, "source_documents": []}
+        retriever = self.vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 6, "fetch_k": 15})
         try:
             docs = retriever.invoke(topic)
-            
-            context_parts = []
-            for doc in docs:
-                context_parts.append(doc.page_content)
-            context = "\n\n".join(context_parts)
-            
+            context = "\n\n".join(d.page_content for d in docs)
             eval_prompt = f"""Eres un Tutor Socrático evaluando a un estudiante.
 
 CONTEXTO PREVIO: {previous_content}
@@ -374,14 +228,10 @@ FORMATO:
 - Feedback constructivo (sin dar la solución si falló).
 - Nueva pregunta o reto.
 """
-
             response = self.llm.invoke(eval_prompt)
             content = extract_text(response.content).strip()
-            
-            # Determinar si fue correcta basándose en el emoji
             is_correct = content.startswith("✅")
             is_partial = content.startswith("⚠️")
-            
             return {
                 "content": content,
                 "is_correct": is_correct,
@@ -391,16 +241,10 @@ FORMATO:
                 "topic": topic,
                 "source_documents": docs
             }
-            
         except Exception as e:
-            return {
-                "content": f"Error evaluando respuesta: {str(e)}",
-                "is_correct": False,
-                "source_documents": []
-            }
-    
+            return {"content": f"Error evaluando respuesta: {str(e)}", "is_correct": False, "source_documents": []}
+
     def end_learning_session(self) -> str:
-        """Finaliza la sesión de aprendizaje."""
         return """## 🎓 Sesión de aprendizaje finalizada
 
 ¡Buen trabajo! Has completado esta sesión de estudio.
