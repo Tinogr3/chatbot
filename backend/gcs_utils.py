@@ -3,17 +3,18 @@ Utilidades para Google Cloud Storage (backend) - Sin Streamlit.
 """
 import os
 import tempfile
-import logging
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from google.cloud import storage
+
 from config import BUCKET_NAME
+from logger import get_logger
 from rag_engine import procesar_pdf
 
-logger = logging.getLogger(__name__)
+logger = get_logger("gcs_utils")
 
 
-def get_gcs_client():
+def get_gcs_client() -> Optional[storage.Client]:
     creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if not creds_path or not creds_path.strip():
         return None
@@ -35,9 +36,9 @@ def get_gcs_client():
 def procesar_todos_pdfs_nube(
     bucket_name: str = BUCKET_NAME,
     session_id: Optional[str] = None,
-    document_registry: Optional[dict] = None,
+    document_registry: Optional[Dict[str, Any]] = None,
     max_tokens: int = 65535,
-) -> Tuple[List, List[str], dict, Optional[str]]:
+) -> Tuple[List[Any], List[str], Dict[str, Any], Optional[str]]:
     """
     Descarga y procesa todos los PDFs del bucket.
     Returns: (documents, filenames, document_registry, error_message)

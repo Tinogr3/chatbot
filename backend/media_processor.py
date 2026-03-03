@@ -2,11 +2,13 @@
 MediaProcessor - Procesamiento de contenido multimedia (backend).
 """
 import re
-from typing import List, Dict, Optional, Tuple
-from urllib.parse import urlparse, parse_qs
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
-from youtube_transcript_api import YouTubeTranscriptApi
 from langchain_core.documents import Document
+from youtube_transcript_api import YouTubeTranscriptApi
+
+from exceptions import VideoTranscriptionError
 
 
 def extract_video_id(url: str) -> Optional[str]:
@@ -33,8 +35,10 @@ def extract_video_id(url: str) -> Optional[str]:
 
 def get_transcript_with_timestamps(
     video_id: str,
-    languages: List[str] = ['es', 'en']
-) -> Tuple[List[Dict], str]:
+    languages: Optional[List[str]] = None,
+) -> Tuple[List[Dict[str, Any]], str]:
+    if languages is None:
+        languages = ["es", "en"]
     try:
         for lang in languages:
             try:
@@ -54,17 +58,22 @@ def get_transcript_with_timestamps(
     return generate_transcript_with_whisper(video_id)
 
 
-def generate_transcript_with_whisper(video_id: str) -> Tuple[List[Dict], str]:
-    import tempfile
+def generate_transcript_with_whisper(video_id: str) -> Tuple[List[Dict[str, Any]], str]:
     import os
+    import tempfile
+
     try:
         import yt_dlp
-    except ImportError:
-        raise ValueError("Se requiere yt-dlp para generar transcripciones. Instala con: pip install yt-dlp")
+    except ImportError as e:
+        raise VideoTranscriptionError(
+            "Se requiere yt-dlp para generar transcripciones. Instala con: pip install yt-dlp"
+        ) from e
     try:
         import whisper
-    except ImportError:
-        raise ValueError("Se requiere openai-whisper para generar transcripciones. Instala con: pip install openai-whisper")
+    except ImportError as e:
+        raise VideoTranscriptionError(
+            "Se requiere openai-whisper para generar transcripciones. Instala con: pip install openai-whisper"
+        ) from e
     temp_dir = tempfile.mkdtemp()
     try:
         ydl_opts = {
@@ -84,7 +93,7 @@ def generate_transcript_with_whisper(video_id: str) -> Tuple[List[Dict], str]:
                 audio_path = os.path.join(temp_dir, f)
                 break
         if audio_path is None or not os.path.exists(audio_path):
-            raise ValueError("No se pudo descargar el audio del video.")
+            raise VideoTranscriptionError("No se pudo descargar el audio del video.")
         model = whisper.load_model("base")
         result = model.transcribe(audio_path)
         segments = [
@@ -104,14 +113,16 @@ def process_video(
     url: str,
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
-    languages: List[str] = ['es', 'en']
+    languages: Optional[List[str]] = None,
 ) -> List[Document]:
+    if languages is None:
+        languages = ["es", "en"]
     video_id = extract_video_id(url)
     if not video_id:
-        raise ValueError(f"No se pudo extraer el ID del video de la URL: {url}")
+        raise VideoTranscriptionError(f"No se pudo extraer el ID del video de la URL: {url}")
     transcript_segments, language = get_transcript_with_timestamps(video_id, languages)
     if not transcript_segments:
-        raise ValueError("No se encontró transcripción para este video.")
+        raise VideoTranscriptionError("No se encontró transcripción para este video.")
     documents = []
     current_text = ""
     current_start_time = 0

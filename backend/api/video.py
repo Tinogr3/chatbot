@@ -1,37 +1,26 @@
 """
 Endpoints de procesamiento de video - POST /process_video
 """
-import logging
-from typing import Optional, List
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
-from pydantic import BaseModel
+from fastapi import APIRouter, Header, HTTPException
 
-from media_processor import process_video, is_youtube_url, extract_video_id
-from rag_engine import initialize_vector_store
 from api.chat import invalidate_agent_cache
+from exceptions import VideoTranscriptionError
+from logger import get_logger
+from media_processor import extract_video_id, is_youtube_url, process_video
+from rag_engine import initialize_vector_store
+from schemas import ProcessVideoRequest, ProcessVideoResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger("api.video")
 router = APIRouter(prefix="/process_video", tags=["video"])
-
-
-class ProcessVideoRequest(BaseModel):
-    url: str
-    session_id: Optional[str] = None
-
-
-class ProcessVideoResponse(BaseModel):
-    success: bool
-    document_count: int
-    video_id: Optional[str] = None
-    message: str
 
 
 @router.post("", response_model=ProcessVideoResponse)
 def process_video_endpoint(
     body: ProcessVideoRequest,
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
-):
+) -> ProcessVideoResponse:
     session_id = (body.session_id or x_session_id or "").strip().lower().replace(" ", "_")
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id requerido (header X-Session-Id o body)")
@@ -43,11 +32,12 @@ def process_video_endpoint(
 
     try:
         documents = process_video(url)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except VideoTranscriptionError as e:
+        logger.warning("Video transcription error: %s", e.message)
+        raise HTTPException(status_code=400, detail=e.message) from e
     except Exception as e:
         logger.exception("Error processing video: %s", e)
-        raise HTTPException(status_code=500, detail=f"Error al procesar video: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al procesar video: {str(e)}") from e
 
     if not documents:
         return ProcessVideoResponse(

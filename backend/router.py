@@ -2,16 +2,19 @@
 Smart Router - Sistema de enrutamiento inteligente de queries (backend).
 """
 import os
-from typing import Dict, Any, Optional
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.documents import Document
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from config import get_credentials_and_project
+from logger import get_logger
+
+logger = get_logger("router")
 
 
-def extract_text(content) -> str:
+def extract_text(content: Any) -> str:
     if isinstance(content, list):
         text_parts = []
         for item in content:
@@ -31,7 +34,7 @@ class QueryCategory(Enum):
     OTRO = "OTRO"
 
 
-def get_model(temperature: float = 0.7, max_output_tokens: int = 65535):
+def get_model(temperature: float = 0.7, max_output_tokens: int = 65535) -> Optional[ChatGoogleGenerativeAI]:
     try:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
@@ -51,9 +54,9 @@ def get_model(temperature: float = 0.7, max_output_tokens: int = 65535):
                 project=project_id,
                 location="global",
             )
-    except Exception:
-        pass
-    return None
+    except Exception as e:
+        logger.warning("Error initializing LLM: %s", e)
+        return None
 
 
 def route_query(query: str, max_tokens: int = 65535) -> str:
@@ -87,7 +90,8 @@ CATEGORÍA:"""
             if valid_cat in category:
                 return valid_cat
         return QueryCategory.PREGUNTA_DOCUMENTO.value
-    except Exception:
+    except Exception as e:
+        logger.warning("Error routing query: %s", e)
         return QueryCategory.PREGUNTA_DOCUMENTO.value
 
 
@@ -111,10 +115,16 @@ RESPUESTA:"""
         response = llm.invoke(prompt)
         return extract_text(response.content).strip()
     except Exception as e:
+        logger.warning("Error in get_direct_response: %s", e)
         return f"Error al generar respuesta: {str(e)}"
 
 
-def get_summary_response(query: str, vector_store, session_id: Optional[str] = None, max_tokens: int = 65535) -> Dict[str, Any]:
+def get_summary_response(
+    query: str,
+    vector_store: Any,
+    session_id: Optional[str] = None,
+    max_tokens: int = 65535,
+) -> Dict[str, Any]:
     llm = get_model(temperature=0.3, max_output_tokens=max_tokens)
     if not llm:
         return {"answer": "No puedo generar el resumen en este momento.", "source_documents": []}
@@ -144,17 +154,19 @@ RESUMEN ESTRUCTURADO:"""
         response = llm.invoke(summary_prompt)
         return {"answer": extract_text(response.content).strip(), "source_documents": docs}
     except Exception as e:
+        logger.warning("Error generating summary: %s", e)
         return {"answer": f"Error generando resumen: {str(e)}", "source_documents": []}
 
 
 class LearningFlowManager:
-    def __init__(self, vector_store, session_id: Optional[str] = None, max_tokens: int = 65535):
+    def __init__(self, vector_store: Any, session_id: Optional[str] = None, max_tokens: int = 65535) -> None:
         self.vector_store = vector_store
         self.session_id = session_id
         self.max_tokens = max_tokens
         self.llm = get_model(temperature=0.3, max_output_tokens=max_tokens)
 
     def start_learning_session(self, topic_query: str) -> Dict[str, Any]:
+        """Inicia una sesión de aprendizaje sobre el tema indicado."""
         if not self.llm:
             return {"content": "No puedo iniciar la sesión de aprendizaje en este momento.", "question": None, "topic": None, "source_documents": []}
         retriever = self.vector_store.as_retriever(
@@ -197,6 +209,7 @@ FORMATO DE RESPUESTA:
                 "source_documents": docs
             }
         except Exception as e:
+            logger.warning("Error starting learning session: %s", e)
             return {"content": f"Error iniciando sesión de aprendizaje: {str(e)}", "question": None, "topic": None, "source_documents": []}
 
     def evaluate_answer(self, user_answer: str, topic: str, previous_content: str) -> Dict[str, Any]:
@@ -242,6 +255,7 @@ FORMATO:
                 "source_documents": docs
             }
         except Exception as e:
+            logger.warning("Error evaluating answer: %s", e)
             return {"content": f"Error evaluando respuesta: {str(e)}", "is_correct": False, "source_documents": []}
 
     def end_learning_session(self) -> str:

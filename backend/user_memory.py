@@ -5,11 +5,11 @@ import os
 import sqlite3
 import threading
 import time
-from typing import List, Dict, Optional
 from contextlib import contextmanager
+from typing import Any, Dict, Generator, List, Optional
 
-from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel, Field
 
 from config import get_credentials_and_project
 
@@ -33,13 +33,13 @@ def _get_db_path() -> str:
 class UserMemoryManager:
     """Gestor de memoria de usuario a largo plazo."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None) -> None:
         self.db_path = db_path or _get_db_path()
         self._create_tables()
         self._llm_cache: Dict[int, Optional[ChatGoogleGenerativeAI]] = {}
 
     @contextmanager
-    def _get_connection(self):
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
@@ -47,7 +47,7 @@ class UserMemoryManager:
         finally:
             conn.close()
 
-    def _create_tables(self):
+    def _create_tables(self) -> None:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("PRAGMA journal_mode=WAL;")
@@ -66,7 +66,7 @@ class UserMemoryManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_profile_session ON user_profile(session_id)")
             conn.commit()
 
-    def _get_llm(self, max_tokens: int = 65535):
+    def _get_llm(self, max_tokens: int = 65535) -> Optional[ChatGoogleGenerativeAI]:
         if max_tokens not in self._llm_cache:
             credentials, project_id = get_credentials_and_project()
             if not project_id:
@@ -90,7 +90,7 @@ class UserMemoryManager:
                 )
         return self._llm_cache[max_tokens]
 
-    def extract_user_facts(self, user_message: str, ai_response: str, max_tokens: int = 65535) -> List[Dict]:
+    def extract_user_facts(self, user_message: str, ai_response: str, max_tokens: int = 65535) -> List[Dict[str, Any]]:
         llm = self._get_llm(max_tokens=max_tokens)
         if not llm:
             return []
@@ -115,7 +115,7 @@ INSTRUCCIONES:
         except Exception:
             return []
 
-    def save_facts(self, session_id: str, facts: List[Dict], max_retries: int = 3) -> int:
+    def save_facts(self, session_id: str, facts: List[Dict[str, Any]], max_retries: int = 3) -> int:
         if not facts:
             return 0
         saved_count = 0
@@ -146,7 +146,7 @@ INSTRUCCIONES:
                 break
         return saved_count
 
-    def get_user_facts(self, session_id: str) -> List[Dict]:
+    def get_user_facts(self, session_id: str) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -187,8 +187,8 @@ INSTRUCCIONES:
             conn.commit()
             return cursor.rowcount
 
-    def extract_and_save_async(self, session_id: str, user_message: str, ai_response: str, max_tokens: int = 65535):
-        def _run():
+    def extract_and_save_async(self, session_id: str, user_message: str, ai_response: str, max_tokens: int = 65535) -> None:
+        def _run() -> None:
             try:
                 facts = self.extract_user_facts(user_message, ai_response, max_tokens=max_tokens)
                 if facts:

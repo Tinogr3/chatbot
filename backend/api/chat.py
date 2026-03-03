@@ -1,25 +1,25 @@
 """
 Endpoints de chat - POST /chat
 """
-import logging
-from typing import Optional, List, Any
+from typing import Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, Header
-from pydantic import BaseModel
+from fastapi import APIRouter, Header, HTTPException
 
+from chat_manager import ChatHistoryManager
+from document_registry import load_document_registry
+from logger import get_logger
+from rag_engine import extract_text, initialize_agent, initialize_vector_store
 from router import (
-    route_query,
+    QueryCategory,
+    LearningFlowManager,
     get_direct_response,
     get_summary_response,
-    LearningFlowManager,
-    QueryCategory,
+    route_query,
 )
-from rag_engine import initialize_vector_store, initialize_agent, extract_text
-from chat_manager import ChatHistoryManager
+from schemas import ChatRequest, ChatResponse
 from user_memory import UserMemoryManager
-from document_registry import load_document_registry
 
-logger = logging.getLogger(__name__)
+logger = get_logger("api.chat")
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 chat_manager = ChatHistoryManager()
@@ -29,7 +29,7 @@ user_memory = UserMemoryManager()
 _agent_cache: dict = {}
 
 
-def _get_agent(session_id: str, temperature: float, max_tokens: int):
+def _get_agent(session_id: str, temperature: float, max_tokens: int) -> Optional[Any]:
     if session_id in _agent_cache:
         return _agent_cache[session_id]
     vector_store = initialize_vector_store(documents=None, existing_vector_store=None, session_id=session_id)
@@ -50,28 +50,11 @@ def _get_agent(session_id: str, temperature: float, max_tokens: int):
     return agent
 
 
-def invalidate_agent_cache(session_id: str):
+def invalidate_agent_cache(session_id: str) -> None:
     _agent_cache.pop(session_id, None)
 
 
-class ChatRequest(BaseModel):
-    message: str
-    session_id: Optional[str] = None
-    temperature: float = 0.7
-    max_tokens: int = 65535
-    learning_mode: bool = False
-    learning_topic: Optional[str] = None
-    last_learning_content: Optional[str] = None
-
-
-class ChatResponse(BaseModel):
-    answer: str
-    sources: List[str] = []
-    learning_mode: bool = False
-    learning_topic: Optional[str] = None
-
-
-def _message_content_to_str(content) -> str:
+def _message_content_to_str(content: Any) -> str:
     if content is None:
         return ""
     if isinstance(content, list):
@@ -100,7 +83,7 @@ def _doc_to_source(doc: Any) -> str:
 def chat(
     body: ChatRequest,
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
-):
+) -> ChatResponse:
     session_id = (body.session_id or x_session_id or "").strip().lower().replace(" ", "_")
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id requerido (header X-Session-Id o body)")

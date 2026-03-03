@@ -3,9 +3,11 @@ Persistencia del document_registry por sesión (backend).
 """
 import os
 import json
-import logging
+from typing import Any, Dict
 
-logger = logging.getLogger(__name__)
+from logger import get_logger
+
+logger = get_logger("document_registry")
 
 
 def _registry_dir() -> str:
@@ -18,7 +20,7 @@ def get_registry_path(session_id: str) -> str:
     return os.path.join(_registry_dir(), f"document_registry_{session_id}.json")
 
 
-def load_document_registry(session_id: str) -> dict:
+def load_document_registry(session_id: str) -> Dict[str, Any]:
     path = get_registry_path(session_id)
     if not os.path.exists(path):
         return {}
@@ -30,7 +32,7 @@ def load_document_registry(session_id: str) -> dict:
         return {}
 
 
-def save_document_registry(session_id: str, registry: dict) -> None:
+def save_document_registry(session_id: str, registry: Dict[str, Any]) -> None:
     if not registry:
         return
     path = get_registry_path(session_id)

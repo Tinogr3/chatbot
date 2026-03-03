@@ -2,25 +2,27 @@
 Endpoints de sesión - POST /clear_session
 """
 import os
-import logging
+import shutil
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, Header, HTTPException
 
+from api.chat import invalidate_agent_cache
 from chat_manager import ChatHistoryManager
 from document_registry import clear_document_registry
-from api.chat import invalidate_agent_cache
+from logger import get_logger
 from rag_engine import _chroma_persist_directory
+from schemas import ClearSessionResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger("api.session")
 router = APIRouter(prefix="/session", tags=["session"])
 chat_manager = ChatHistoryManager()
 
 
-@router.post("/clear")
+@router.post("/clear", response_model=ClearSessionResponse)
 def clear_session(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
-):
+) -> ClearSessionResponse:
     session_id = (x_session_id or "").strip().lower().replace(" ", "_")
     if not session_id:
         raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
@@ -32,9 +34,8 @@ def clear_session(
     persist_dir = _chroma_persist_directory(session_id)
     if os.path.exists(persist_dir):
         try:
-            import shutil
             shutil.rmtree(persist_dir)
-        except Exception as e:
+        except OSError as e:
             logger.warning("Error removing chroma dir for %s: %s", session_id, e)
 
-    return {"message": "Sesión limpiada correctamente."}
+    return ClearSessionResponse(message="Sesión limpiada correctamente.")

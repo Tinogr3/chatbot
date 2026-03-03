@@ -6,31 +6,31 @@ import re
 import time
 import base64
 import tempfile
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools.retriever import create_retriever_tool
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import AIMessage
+from pydantic import BaseModel, Field
 
 from config import get_credentials_and_project
+from exceptions import DocumentProcessingError
+from logger import get_logger
 from user_memory import UserMemoryManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger("rag_engine")
 
 _embeddings_cache: Optional[GoogleGenerativeAIEmbeddings] = None
 
 
-def extract_text(content) -> str:
+def extract_text(content: Any) -> str:
     if isinstance(content, list):
         text_parts = []
         for item in content:
@@ -42,7 +42,7 @@ def extract_text(content) -> str:
     return str(content) if content is not None else ""
 
 
-def get_gemini_vision_model(max_tokens: int = 65535):
+def get_gemini_vision_model(max_tokens: int = 65535) -> Optional[ChatGoogleGenerativeAI]:
     try:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
@@ -89,6 +89,7 @@ Responde en español con una descripción clara y concisa."""
 
 
 def extract_images_from_pdf(pdf_path: str) -> List[Tuple[bytes, int, str]]:
+    """Extrae imágenes de un PDF; retorna lista de (bytes, número_página, id_imagen)."""
     images = []
     try:
         import fitz
@@ -168,7 +169,7 @@ class DocumentCardSchema(BaseModel):
     hypothetical_questions: List[str] = Field(description="Tres preguntas que este documento responde perfectamente (HyDE).")
 
 
-def generate_document_card(text_content: str, filename: str) -> dict:
+def generate_document_card(text_content: str, filename: str) -> Dict[str, Any]:
     truncated_text = text_content[:15000] if len(text_content) > 15000 else text_content
     prompt = f"""Analiza el siguiente texto extraído del documento "{filename}" y genera la ficha (document card) con:
 - Un resumen ejecutivo del documento en exactamente 2 líneas.
@@ -304,10 +305,10 @@ def procesar_pdf(
         return all_documents, document_registry
     except Exception as e:
         logger.exception("Error processing PDF: %s", e)
-        return [], document_registry
+        raise DocumentProcessingError(f"Error procesando PDF: {e}") from e
 
 
-def create_document_tool(vector_store, filename: str, usage_guide: str):
+def create_document_tool(vector_store: Any, filename: str, usage_guide: str) -> Optional[Any]:
     try:
         filename_sanitized = re.sub(r"[^a-zA-Z0-9]", "_", Path(filename).stem).strip("_").lower()
         tool_name = f"search_document_{filename_sanitized}"
@@ -330,7 +331,7 @@ def _chroma_persist_directory(session_id: Optional[str]) -> str:
 
 def initialize_vector_store(
     documents: Optional[List[Document]] = None,
-    existing_vector_store=None,
+    existing_vector_store: Optional[Any] = None,
     session_id: Optional[str] = None,
 ) -> Optional[Any]:
     persist_directory = _chroma_persist_directory(session_id)
@@ -376,13 +377,13 @@ def initialize_vector_store(
 
 
 def initialize_agent(
-    vector_store,
+    vector_store: Any,
     temperature: float = 0.7,
     max_tokens: int = 2048,
     session_id: Optional[str] = None,
-    chat_history: Optional[list] = None,
-    document_registry: Optional[dict] = None,
-):
+    chat_history: Optional[List[Dict[str, Any]]] = None,
+    document_registry: Optional[Dict[str, Any]] = None,
+) -> Optional[Any]:
     if vector_store is None:
         return None
     try:

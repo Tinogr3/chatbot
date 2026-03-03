@@ -1,6 +1,7 @@
 """Utilidades de presentación para el frontend (sin llamadas al backend)."""
 import re
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
+from typing import Optional
 
 
 def format_timestamp(seconds: float) -> str:
@@ -13,7 +14,7 @@ def format_timestamp(seconds: float) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-def extract_video_id(url: str):
+def extract_video_id(url: str) -> Optional[str]:
     if not url:
         return None
     patterns = [

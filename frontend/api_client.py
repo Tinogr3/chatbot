@@ -3,15 +3,15 @@ Cliente HTTP para la API del backend.
 Todas las peticiones envían X-Session-Id cuando hay session_id.
 """
 import os
-from typing import Optional, List, Any
+from typing import Any, Dict, List, Optional
 
 import httpx
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-DEFAULT_TIMEOUT = 120.0
+BACKEND_URL: str = os.getenv("BACKEND_URL", "http://localhost:8000")
+DEFAULT_TIMEOUT: float = 120.0
 
 
-def _headers(session_id: Optional[str] = None) -> dict:
+def _headers(session_id: Optional[str] = None) -> Dict[str, str]:
     h = {"Content-Type": "application/json"}
     if session_id:
         h["X-Session-Id"] = session_id
@@ -26,7 +26,7 @@ def chat(
     learning_mode: bool = False,
     learning_topic: Optional[str] = None,
     last_learning_content: Optional[str] = None,
-) -> dict:
+) -> Dict[str, Any]:
     """POST /chat"""
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
         r = client.post(
@@ -46,7 +46,7 @@ def chat(
         return r.json()
 
 
-def upload_pdf(file_content: bytes, filename: str, session_id: str) -> dict:
+def upload_pdf(file_content: bytes, filename: str, session_id: str) -> Dict[str, Any]:
     """POST /upload (multipart)"""
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
         r = client.post(
@@ -58,7 +58,7 @@ def upload_pdf(file_content: bytes, filename: str, session_id: str) -> dict:
         return r.json()
 
 
-def load_cloud_pdfs(session_id: str) -> dict:
+def load_cloud_pdfs(session_id: str) -> Dict[str, Any]:
     """POST /upload/load_cloud"""
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
         r = client.post(
@@ -69,7 +69,7 @@ def load_cloud_pdfs(session_id: str) -> dict:
         return r.json()
 
 
-def process_video(url: str, session_id: str) -> dict:
+def process_video(url: str, session_id: str) -> Dict[str, Any]:
     """POST /process_video"""
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
         r = client.post(
@@ -81,7 +81,7 @@ def process_video(url: str, session_id: str) -> dict:
         return r.json()
 
 
-def get_history(session_id: str) -> List[dict]:
+def get_history(session_id: str) -> List[Dict[str, Any]]:
     """GET /history"""
     with httpx.Client(timeout=30.0) as client:
         r = client.get(f"{BACKEND_URL}/history", headers=_headers(session_id))
@@ -97,7 +97,7 @@ def delete_history(session_id: str) -> int:
         return r.json().get("deleted", 0)
 
 
-def get_user_facts(session_id: str) -> List[dict]:
+def get_user_facts(session_id: str) -> List[Dict[str, Any]]:
     """GET /user_facts"""
     with httpx.Client(timeout=30.0) as client:
         r = client.get(f"{BACKEND_URL}/user_facts", headers=_headers(session_id))

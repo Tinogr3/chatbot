@@ -3,8 +3,8 @@ ChatHistoryManager - Gestión de persistencia del historial de chat usando SQLit
 """
 import sqlite3
 import json
-from typing import List, Dict, Optional
 from contextlib import contextmanager
+from typing import Any, Dict, Generator, List, Optional
 
 
 def _get_db_path() -> str:
@@ -22,7 +22,7 @@ class ChatHistoryManager:
         self._create_tables()
 
     @contextmanager
-    def _get_connection(self):
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
@@ -30,7 +30,7 @@ class ChatHistoryManager:
         finally:
             conn.close()
 
-    def _create_tables(self):
+    def _create_tables(self) -> None:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("PRAGMA journal_mode=WAL;")
@@ -66,7 +66,7 @@ class ChatHistoryManager:
             conn.commit()
             return cursor.lastrowid
 
-    def get_history(self, session_id: str, limit: int = 50) -> List[Dict]:
+    def get_history(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""

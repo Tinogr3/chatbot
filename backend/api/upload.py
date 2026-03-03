@@ -3,41 +3,27 @@ Endpoints de subida de PDFs - POST /upload, POST /upload/load_cloud
 """
 import os
 import tempfile
-import logging
-from typing import Optional, List
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Header
-from pydantic import BaseModel
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 
-from rag_engine import procesar_pdf, initialize_vector_store
-from gcs_utils import upload_to_gcs, procesar_todos_pdfs_nube
-from document_registry import load_document_registry, save_document_registry
 from api.chat import invalidate_agent_cache
+from document_registry import load_document_registry, save_document_registry
+from exceptions import DocumentProcessingError
+from gcs_utils import procesar_todos_pdfs_nube, upload_to_gcs
+from logger import get_logger
+from rag_engine import initialize_vector_store, procesar_pdf
+from schemas import LoadCloudResponse, UploadResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger("api.upload")
 router = APIRouter(prefix="/upload", tags=["upload"])
-
-
-class UploadResponse(BaseModel):
-    success: bool
-    gcs_path: Optional[str] = None
-    filename: str
-    document_count: int
-    message: str
-
-
-class LoadCloudResponse(BaseModel):
-    success: bool
-    filenames: List[str]
-    document_count: int
-    message: str
 
 
 @router.post("", response_model=UploadResponse)
 async def upload_pdf(
     file: UploadFile = File(...),
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
-):
+) -> UploadResponse:
     session_id = (x_session_id or "").strip().lower().replace(" ", "_")
     if not session_id:
         raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
@@ -66,9 +52,12 @@ async def upload_pdf(
             session_id=session_id,
             document_registry=registry,
         )
+    except DocumentProcessingError as e:
+        logger.exception("Document processing failed: %s", e.message)
+        raise HTTPException(status_code=500, detail=e.message) from e
     except Exception as e:
         logger.exception("Error processing PDF: %s", e)
-        raise HTTPException(status_code=500, detail=f"Error procesando PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error procesando PDF: {str(e)}") from e
     finally:
         os.unlink(tmp_path)
 
@@ -105,7 +94,7 @@ async def upload_pdf(
 @router.post("/load_cloud", response_model=LoadCloudResponse)
 def load_cloud_pdfs(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
-):
+) -> LoadCloudResponse:
     session_id = (x_session_id or "").strip().lower().replace(" ", "_")
     if not session_id:
         raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
