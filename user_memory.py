@@ -4,8 +4,6 @@ Extrae y almacena hechos sobre el usuario para personalizar las respuestas del c
 """
 
 import os
-import re
-import json
 import sqlite3
 import threading
 import time
@@ -13,9 +11,23 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from contextlib import contextmanager
 
+from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
-import config as _config
 from config import get_credentials_and_project
+
+
+class UserFactSchema(BaseModel):
+    """Un hecho extraído sobre el usuario."""
+
+    tipo: str = Field(description="Categoría: nombre, trabajo, educacion, stack_tecnologico, preferencias, ubicacion, otro")
+    valor: str = Field(description="Valor del hecho mencionado por el usuario")
+    confianza: float = Field(default=0.8, ge=0.0, le=1.0, description="Confianza en el hecho (0-1)")
+
+
+class UserFactsOutputSchema(BaseModel):
+    """Lista de hechos sobre el usuario extraídos de la conversación."""
+
+    facts: List[UserFactSchema] = Field(default_factory=list, description="Lista de hechos concretos extraídos")
 
 
 class UserMemoryManager:
@@ -33,7 +45,7 @@ class UserMemoryManager:
         """
         self.db_path = db_path
         self._create_tables()
-        self._llm = None
+        self._llm_cache: Dict[int, Optional[ChatGoogleGenerativeAI]] = {}
     
     @contextmanager
     def _get_connection(self):
@@ -49,6 +61,7 @@ class UserMemoryManager:
         """Crea la tabla user_profile si no existe."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL;")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS user_profile (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,50 +80,48 @@ class UserMemoryManager:
             """)
             conn.commit()
     
-    def _get_llm(self):
-        """Obtiene o inicializa el LLM (Gemini Flash) para extracción de hechos."""
-        if self._llm is None:
+    def _get_llm(self, max_tokens: int = 65535):
+        """Obtiene o inicializa el LLM (Gemini Flash) para extracción de hechos. Cache por max_tokens."""
+        if max_tokens not in self._llm_cache:
             credentials, project_id = get_credentials_and_project()
-            
             if not project_id:
                 api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
                 if not api_key:
                     return None
-                
-                self._llm = ChatGoogleGenerativeAI(
+                self._llm_cache[max_tokens] = ChatGoogleGenerativeAI(
                     model="gemini-3-flash-preview",
-                    temperature=0.1,  # Baja temperatura para extracción precisa
-                    max_output_tokens=_config.USER_MAX_OUTPUT_TOKENS,
+                    temperature=0.1,
+                    max_output_tokens=max_tokens,
                     api_key=api_key
                 )
             else:
-                self._llm = ChatGoogleGenerativeAI(
+                self._llm_cache[max_tokens] = ChatGoogleGenerativeAI(
                     model="gemini-3-flash-preview",
                     temperature=0.1,
-                    max_output_tokens=_config.USER_MAX_OUTPUT_TOKENS,
+                    max_output_tokens=max_tokens,
                     vertexai=True,
                     project=project_id,
                     location="global",
                 )
-        
-        return self._llm
+        return self._llm_cache[max_tokens]
     
-    def extract_user_facts(self, user_message: str, ai_response: str) -> List[Dict]:
+    def extract_user_facts(self, user_message: str, ai_response: str, max_tokens: int = 65535) -> List[Dict]:
         """
         Extrae hechos relevantes sobre el usuario usando Gemini Flash.
         
         Args:
             user_message: Mensaje del usuario.
             ai_response: Respuesta del asistente.
+            max_tokens: Límite de tokens (p. ej. st.session_state["max_tokens"]).
         
         Returns:
             Lista de diccionarios con los hechos extraídos.
         """
-        llm = self._get_llm()
+        llm = self._get_llm(max_tokens=max_tokens)
         if not llm:
             return []
-        
-        extraction_prompt = f"""Analiza la siguiente conversación y extrae ÚNICAMENTE hechos concretos y relevantes sobre el usuario.
+
+        extraction_prompt = f"""Analiza la siguiente conversación y extrae hechos concretos y relevantes sobre el usuario.
 
 MENSAJE DEL USUARIO:
 {user_message}
@@ -119,114 +130,19 @@ RESPUESTA DEL ASISTENTE:
 {ai_response}
 
 INSTRUCCIONES:
-1. Extrae SOLO hechos explícitos mencionados por el usuario (no inferencias)
-2. Categoriza cada hecho en uno de estos tipos:
-   - "nombre": Nombre del usuario
-   - "trabajo": Profesión, cargo o empresa
-   - "educacion": Estudios, universidad, carrera
-   - "stack_tecnologico": Lenguajes, frameworks, herramientas que usa
-   - "preferencias": Preferencias de aprendizaje, temas de interés
-   - "ubicacion": Ciudad, país
-   - "otro": Otros hechos relevantes
-
-3. Si NO hay hechos relevantes, devuelve una lista vacía: []
-4. Responde ÚNICAMENTE con JSON válido, sin texto adicional.
-
-FORMATO DE RESPUESTA (JSON):
-[
-  {{"tipo": "stack_tecnologico", "valor": "Python", "confianza": 0.9}},
-  {{"tipo": "trabajo", "valor": "desarrollador senior", "confianza": 0.8}}
-]
-
-RESPUESTA JSON:"""
+- Extrae SOLO hechos explícitos mencionados por el usuario (no inferencias).
+- Categoriza cada hecho en uno de estos tipos: nombre, trabajo, educacion, stack_tecnologico, preferencias, ubicacion, otro.
+- Si NO hay hechos relevantes, devuelve una lista vacía de facts."""
 
         try:
-            response = llm.invoke(extraction_prompt)
-            # #region agent log
-            try:
-                import json as _json
-                _log_path = "/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log"
-                _content = response.content
-                with open(_log_path, "a") as _f:
-                    _f.write(_json.dumps({"sessionId": "c40eac", "location": "user_memory.py:extract_user_facts", "message": "response.content before assign", "data": {"content_type": type(_content).__name__, "content_repr": repr(_content)[:400]}, "hypothesisId": "H3", "timestamp": __import__("time").time() * 1000}) + "\n")
-            except Exception:
-                pass
-            # #endregion
-            if isinstance(response.content, list):
-                text_parts = []
-                for item in response.content:
-                    if isinstance(item, dict) and "text" in item:
-                        text_parts.append(item["text"])
-                    elif isinstance(item, str):
-                        text_parts.append(item)
-                content = "".join(text_parts).strip()
-            else:
-                content = str(response.content).strip()
-            
-            # DEBUG: Log raw response
-            print(f"DEBUG JSON RAW: {content}")
-            
-            # Usar regex robusta para extraer el JSON array
-            # Buscar el primer '[' y el último ']'
-            json_match = re.search(r'\[.*\]', content, re.DOTALL)
-            if json_match:
-                content = json_match.group(0)
-            else:
-                # Intentar limpiar manualmente
-                if content.startswith("```json"):
-                    content = content[7:]
-                if content.startswith("```"):
-                    content = content[3:]
-                if content.endswith("```"):
-                    content = content[:-3]
-                content = content.strip()
-            
-            # Si está vacío o no es JSON válido, retornar lista vacía
-            if not content or content == "[]":
+            structured_llm = llm.with_structured_output(UserFactsOutputSchema)
+            result = structured_llm.invoke(extraction_prompt)
+            if result is None or not result.facts:
                 return []
-            
-            # Intentar parsear; si el modelo devuelve JSON truncado o mal formado, intentar reparar
-            facts = None
-            try:
-                facts = json.loads(content)
-            except json.JSONDecodeError:
-                facts = None
-                # Quitar comas finales antes de ] o } (frecuente en respuestas del modelo)
-                repaired = re.sub(r',\s*([}\]])', r'\1', content)
-                try:
-                    facts = json.loads(repaired)
-                except json.JSONDecodeError:
-                    # Si parece truncado (falta cierre de array), intentar cerrar
-                    trimmed = content.rstrip()
-                    if trimmed.endswith("}") and "]" not in trimmed[trimmed.rfind("}"):]:
-                        try:
-                            facts = json.loads(trimmed + "]")
-                        except json.JSONDecodeError:
-                            pass
-                    if facts is None:
-                        # Extraer objetos completos {\"tipo\": ..., \"valor\": ..., \"confianza\": ...}
-                        objs = re.findall(r'\{\s*"tipo"\s*:\s*"([^"]*)"\s*,\s*"valor"\s*:\s*"([^"]*)"\s*(?:,\s*"confianza"\s*:\s*([\d.]+))?\s*\}', content)
-                        if objs:
-                            facts = [{"tipo": g[0], "valor": g[1], "confianza": float(g[2]) if g[2] else 0.8} for g in objs]
-            
-            if not facts or not isinstance(facts, list):
-                return []
-            
-            # Validar estructura de los hechos
-            validated_facts = []
-            for fact in facts:
-                if isinstance(fact, dict) and "tipo" in fact and "valor" in fact:
-                    validated_facts.append({
-                        "tipo": fact.get("tipo", "otro"),
-                        "valor": fact.get("valor", ""),
-                        "confianza": float(fact.get("confianza", 0.8))
-                    })
-            
-            return validated_facts
-            
-        except json.JSONDecodeError as e:
-            print(f"[UserMemory] Error JSON decode: {e}")
-            return []
+            return [
+                {"tipo": f.tipo, "valor": f.valor, "confianza": f.confianza}
+                for f in result.facts
+            ]
         except Exception as e:
             print(f"[UserMemory] Error extrayendo hechos: {e}")
             return []
@@ -378,7 +294,7 @@ RESPUESTA JSON:"""
             conn.commit()
             return cursor.rowcount
     
-    def extract_and_save_async(self, session_id: str, user_message: str, ai_response: str):
+    def extract_and_save_async(self, session_id: str, user_message: str, ai_response: str, max_tokens: int = 65535):
         """
         Extrae y guarda hechos de forma asíncrona (en un thread separado).
         No bloquea el hilo principal del chat.
@@ -387,10 +303,11 @@ RESPUESTA JSON:"""
             session_id: ID de la sesión del usuario.
             user_message: Mensaje del usuario.
             ai_response: Respuesta del asistente.
+            max_tokens: Límite de tokens (p. ej. st.session_state["max_tokens"]).
         """
         def _extract_and_save():
             try:
-                facts = self.extract_user_facts(user_message, ai_response)
+                facts = self.extract_user_facts(user_message, ai_response, max_tokens=max_tokens)
                 if facts:
                     saved = self.save_facts(session_id, facts)
                     print(f"[UserMemory] Extraídos y guardados {saved} hechos del usuario")

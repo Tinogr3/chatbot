@@ -6,8 +6,11 @@ import os
 import tempfile
 import uuid
 import json
+import logging
 
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 # Importar el gestor de historial de chat
 from chat_manager import ChatHistoryManager
@@ -148,7 +151,7 @@ if "messages" not in st.session_state:
 
 if "vector_store" not in st.session_state:
     # Intentar cargar base de datos existente de ChromaDB
-    st.session_state.vector_store = initialize_vector_store()
+    st.session_state.vector_store = initialize_vector_store(session_id=st.session_state.session_id)
 
 if "conversation_chain" not in st.session_state:
     st.session_state.conversation_chain = None
@@ -167,9 +170,6 @@ if "modo_operacion" not in st.session_state:
 
 if "max_tokens" not in st.session_state:
     st.session_state.max_tokens = 65535
-# Sincronizar límite de tokens con config para router/rag/user_memory (por si el sidebar no ha corrido aún)
-import config as _app_config
-_app_config.USER_MAX_OUTPUT_TOKENS = st.session_state.get("max_tokens", 65535)
 
 if "archivos_manuales" not in st.session_state:
     st.session_state.archivos_manuales = []
@@ -314,7 +314,7 @@ with st.sidebar:
                 
                 if documents:
                     # Crear nuevo vector store (sin pasar existing_vector_store)
-                    vector_store = initialize_vector_store(documents, existing_vector_store=None)
+                    vector_store = initialize_vector_store(documents, existing_vector_store=None, session_id=st.session_state.session_id)
                     
                     if vector_store:
                         st.session_state.vector_store = vector_store
@@ -370,7 +370,7 @@ with st.sidebar:
                             tmp_file.write(file_content)
                             tmp_path = tmp_file.name
 
-                        documents = procesar_pdf(tmp_path)
+                        documents = procesar_pdf(tmp_path, max_tokens=st.session_state.get("max_tokens", 65535))
                         os.unlink(tmp_path)
 
                         if documents:
@@ -378,7 +378,7 @@ with st.sidebar:
                             existing_vs = None if len(st.session_state.archivos_manuales) == 0 else st.session_state.vector_store
                             
                             # Inicializar o actualizar vector store
-                            vector_store = initialize_vector_store(documents, existing_vector_store=existing_vs)
+                            vector_store = initialize_vector_store(documents, existing_vector_store=existing_vs, session_id=st.session_state.session_id)
 
                             if vector_store:
                                 st.session_state.vector_store = vector_store
@@ -425,7 +425,7 @@ with st.sidebar:
                 if documents:
                     # Agregar al vector store existente o crear nuevo
                     existing_vs = st.session_state.vector_store
-                    vector_store = initialize_vector_store(documents, existing_vector_store=existing_vs)
+                    vector_store = initialize_vector_store(documents, existing_vector_store=existing_vs, session_id=st.session_state.session_id)
                     
                     if vector_store:
                         st.session_state.vector_store = vector_store
@@ -482,12 +482,12 @@ with st.sidebar:
                             tmp_file.write(file_content)
                             tmp_path = tmp_file.name
 
-                        documents = procesar_pdf(tmp_path)
+                        documents = procesar_pdf(tmp_path, max_tokens=st.session_state.get("max_tokens", 65535))
                         os.unlink(tmp_path)
 
                         if documents:
                             # Agregar al vector store existente
-                            vector_store = initialize_vector_store(documents, existing_vector_store=st.session_state.vector_store)
+                            vector_store = initialize_vector_store(documents, existing_vector_store=st.session_state.vector_store, session_id=st.session_state.session_id)
 
                             if vector_store:
                                 st.session_state.vector_store = vector_store
@@ -542,8 +542,9 @@ with st.sidebar:
                         if documents:
                             # Agregar al vector store
                             vector_store = initialize_vector_store(
-                                documents, 
-                                existing_vector_store=st.session_state.vector_store
+                                documents,
+                                existing_vector_store=st.session_state.vector_store,
+                                session_id=st.session_state.session_id
                             )
                             
                             if vector_store:
@@ -636,9 +637,6 @@ with st.sidebar:
         help="Número máximo de tokens en la respuesta"
     )
     st.session_state["max_tokens"] = max_tokens
-    # Actualizar config para que router/rag_engine/user_memory usen este valor
-    import config as _config
-    _config.USER_MAX_OUTPUT_TOKENS = max_tokens
 
     # Botón para aplicar cambios
     if st.button("🔄 Aplicar Parámetros"):
@@ -675,7 +673,7 @@ else:
             st.session_state.agent = initialize_agent(
                 vector_store=st.session_state.vector_store,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=st.session_state.get("max_tokens", 65535),
                 session_id=st.session_state.session_id,
                 chat_history=st.session_state.messages,
                 document_registry=st.session_state.document_registry
@@ -715,7 +713,8 @@ else:
                         if st.session_state.learning_mode and prompt.lower().strip() in ['salir', 'exit', 'terminar', 'fin']:
                             learning_manager = LearningFlowManager(
                                 st.session_state.vector_store,
-                                st.session_state.session_id
+                                st.session_state.session_id,
+                                max_tokens=st.session_state.get("max_tokens", 65535)
                             )
                             answer = learning_manager.end_learning_session()
                             st.session_state.learning_mode = False
@@ -726,7 +725,8 @@ else:
                         elif st.session_state.learning_mode:
                             learning_manager = LearningFlowManager(
                                 st.session_state.vector_store,
-                                st.session_state.session_id
+                                st.session_state.session_id,
+                                max_tokens=st.session_state.get("max_tokens", 65535)
                             )
                             result = learning_manager.evaluate_answer(
                                 user_answer=prompt,
@@ -743,22 +743,21 @@ else:
                             sources = []
                             
                             # Clasificar la query con el router
-                            category = route_query(prompt)
-                            # #region agent log
-                            try:
-                                import json as _json
-                                with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
-                                    _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:route_query_result", "message": "category after router", "data": {"category": category, "prompt_prefix": (prompt or "")[:80]}, "hypothesisId": "path", "timestamp": __import__("time").time() * 1000}) + "\n")
-                            except Exception:
-                                pass
-                            # #endregion
+                            _max_tokens = st.session_state.get("max_tokens", 65535)
+                            category = route_query(prompt, max_tokens=_max_tokens)
+                            logger.debug(
+                                "category after router: category=%s, prompt_prefix=%s",
+                                category,
+                                (prompt or "")[:80],
+                            )
                             if category == QueryCategory.CONVERSACION.value:
                                 # Respuesta directa sin RAG
                                 user_facts = user_memory.get_user_facts_formatted(st.session_state.session_id)
                                 answer = get_direct_response(
-                                    prompt, 
+                                    prompt,
                                     st.session_state.session_id,
-                                    user_facts
+                                    user_facts,
+                                    max_tokens=_max_tokens
                                 )
                             
                             elif category == QueryCategory.RESUMEN.value:
@@ -766,7 +765,8 @@ else:
                                 result = get_summary_response(
                                     prompt,
                                     st.session_state.vector_store,
-                                    st.session_state.session_id
+                                    st.session_state.session_id,
+                                    max_tokens=_max_tokens
                                 )
                                 answer = result.get("answer", "No se pudo generar el resumen.")
                                 source_documents = result.get("source_documents", [])
@@ -775,7 +775,8 @@ else:
                                 # Iniciar modo aprendizaje
                                 learning_manager = LearningFlowManager(
                                     st.session_state.vector_store,
-                                    st.session_state.session_id
+                                    st.session_state.session_id,
+                                    max_tokens=_max_tokens
                                 )
                                 result = learning_manager.start_learning_session(prompt)
                                 answer = result.get("content", "No se pudo iniciar la sesión de aprendizaje.")
@@ -788,43 +789,36 @@ else:
                             
                             else:
                                 # PREGUNTA_DOCUMENTO u OTRO: usar Agente con herramientas
-                                # #region agent log
-                                try:
-                                    import json as _json
-                                    with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
-                                        _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:agent_branch_enter", "message": "entering agent branch", "data": {}, "hypothesisId": "path", "timestamp": __import__("time").time() * 1000}) + "\n")
-                                except Exception:
-                                    pass
-                                # #endregion
+                                logger.debug("entering agent branch")
                                 from langchain_core.messages import HumanMessage as HMsg
                                 agent_result = st.session_state.agent.invoke(
                                     {"messages": [HMsg(content=prompt)]}
                                 )
                                 # Extraer la respuesta del último mensaje AI
                                 agent_messages = agent_result.get("messages", [])
-                                # #region agent log
-                                try:
-                                    import json as _json
-                                    _log_path = "/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log"
-                                    _msg_summary = [{"type": getattr(m, "type", None), "content_type": type(getattr(m, "content", None)).__name__, "content_repr": repr(getattr(m, "content", None))[:280]} for m in agent_messages]
-                                    with open(_log_path, "a") as _f:
-                                        _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:agent_messages", "message": "agent result messages", "data": {"n": len(agent_messages), "messages": _msg_summary}, "hypothesisId": "H2/H5", "timestamp": __import__("time").time() * 1000}) + "\n")
-                                except Exception:
-                                    pass
-                                # #endregion
+                                _msg_summary = [
+                                    {
+                                        "type": getattr(m, "type", None),
+                                        "content_type": type(getattr(m, "content", None)).__name__,
+                                        "content_repr": repr(getattr(m, "content", None))[:280],
+                                    }
+                                    for m in agent_messages
+                                ]
+                                logger.debug(
+                                    "agent result messages: n=%d, messages=%s",
+                                    len(agent_messages),
+                                    _msg_summary,
+                                )
                                 answer = "No se pudo generar una respuesta."
                                 for msg in reversed(agent_messages):
                                     if hasattr(msg, 'content') and msg.type == "ai" and msg.content:
                                         answer = _message_content_to_str(msg.content)
                                         break
-                                # #region agent log
-                                try:
-                                    with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
-                                        _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:answer_after_extract", "message": "answer after extraction", "data": {"len": len(answer), "prefix": answer[:120] if answer else ""}, "hypothesisId": "H1", "timestamp": __import__("time").time() * 1000}) + "\n")
-                                except Exception:
-                                    pass
-                                # #endregion
-                                
+                                logger.debug(
+                                    "answer after extraction: len=%d, prefix=%s",
+                                    len(answer),
+                                    answer[:120] if answer else "",
+                                )
                                 # Extraer source_documents de los ToolMessages
                                 source_documents = []
                                 for msg in agent_messages:
@@ -898,19 +892,17 @@ else:
                         user_memory.extract_and_save_async(
                             st.session_state.session_id,
                             prompt,
-                            answer
+                            answer,
+                            max_tokens=st.session_state.get("max_tokens", 65535)
                         )
                         st.toast('🧠 Analizando memoria...', icon='💾')
                     
                     except Exception as e:
-                        # #region agent log
-                        try:
-                            import json as _json
-                            with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
-                                _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:except", "message": "exception in agent flow", "data": {"type": type(e).__name__, "msg": str(e)[:200]}, "hypothesisId": "H4", "timestamp": __import__("time").time() * 1000}) + "\n")
-                        except Exception:
-                            pass
-                        # #endregion
+                        logger.info(
+                            "exception in agent flow: %s: %s",
+                            type(e).__name__,
+                            str(e)[:200],
+                        )
                         error_msg = f"Error al generar respuesta: {str(e)}"
                         st.error(error_msg)
                         st.session_state.messages.append({

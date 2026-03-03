@@ -15,42 +15,31 @@ from rag_engine import procesar_pdf
 
 
 def get_gcs_client():
-    """Obtiene el cliente de Google Cloud Storage usando credenciales."""
+    """Obtiene el cliente de Google Cloud Storage usando credenciales desde GOOGLE_APPLICATION_CREDENTIALS."""
+    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not creds_path or not creds_path.strip():
+        st.warning(
+            "⚠️ **Variable GOOGLE_APPLICATION_CREDENTIALS no definida**\\n\\n"
+            "Para usar Google Cloud Storage debes definir la variable de entorno estándar "
+            "**GOOGLE_APPLICATION_CREDENTIALS** con la ruta absoluta al archivo JSON de credenciales de servicio.\\n\\n"
+            "Ejemplo en .env: `GOOGLE_APPLICATION_CREDENTIALS=/ruta/absoluta/a/tu-credenciales.json`\\n\\n"
+            "Sin esta variable, el chatbot funcionará en modo local sin acceso a GCS."
+        )
+        return None
+    creds_path = creds_path.strip()
+    if not os.path.isfile(creds_path):
+        st.warning(
+            f"⚠️ **Archivo de credenciales no encontrado**\\n\\n"
+            f"GOOGLE_APPLICATION_CREDENTIALS apunta a: `{creds_path}`\\n\\n"
+            "Comprueba que la ruta sea correcta y que el archivo exista."
+        )
+        return None
     try:
-        # Buscar el archivo de credenciales JSON
-        creds_path = None
-        for file in os.listdir("."):
-            if file.endswith(".json") and "client" in file.lower():
-                creds_path = file
-                break
-        
-        if not creds_path:
-            st.warning(
-                "⚠️ **No se encontró el archivo de credenciales de Google Cloud**\\n\\n"
-                "Para habilitar la funcionalidad de Google Cloud Storage, sigue estos pasos:\\n\\n"
-                "**Opción 1: Usar archivo de credenciales JSON**\\n"
-                "1. Descarga tu archivo de credenciales desde Google Cloud Console\\n"
-                "2. Coloca el archivo .json en el directorio raíz del proyecto (donde está app.py)\\n"
-                "3. El archivo debe contener 'client' en su nombre (ej: client_secret.json)\\n\\n"
-                "**Opción 2: Usar variables de entorno**\\n"
-                "1. Configura la variable GOOGLE_APPLICATION_CREDENTIALS en tu .env\\n"
-                "2. Ejemplo: `GOOGLE_APPLICATION_CREDENTIALS=/ruta/a/credenciales.json`\\n\\n"
-                "**Nota:** Sin credenciales, el chatbot seguirá funcionando en modo local sin acceso a GCS."
-            )
-            return None
-        
         credentials = service_account.Credentials.from_service_account_file(
             creds_path,
             scopes=["https://www.googleapis.com/auth/cloud-platform"]
         )
-        
         return storage.Client(credentials=credentials, project=credentials.project_id)
-    except FileNotFoundError as e:
-        st.warning(
-            f"⚠️ **Archivo de credenciales no encontrado: {str(e)}**\\n\\n"
-            "Asegúrate de que el archivo existe en la ruta especificada."
-        )
-        return None
     except Exception as e:
         st.warning(
             f"⚠️ **Error de autenticación con Google Cloud**\\n\\n"

@@ -10,7 +10,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
 
-import config as _config
 from config import get_credentials_and_project
 
 
@@ -35,16 +34,15 @@ class QueryCategory(Enum):
     OTRO = "OTRO"
 
 
-def get_model(temperature: float = 0.7, max_output_tokens: int = None):
-    """Obtiene el modelo Gemini. Si max_output_tokens es None, usa config.USER_MAX_OUTPUT_TOKENS (slider)."""
-    out_tokens = max_output_tokens if max_output_tokens is not None else _config.USER_MAX_OUTPUT_TOKENS
+def get_model(temperature: float = 0.7, max_output_tokens: int = 65535):
+    """Obtiene el modelo Gemini. max_output_tokens debe pasarse explícitamente (p. ej. desde st.session_state)."""
     try:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
             return ChatGoogleGenerativeAI(
                 model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
-                max_output_tokens=out_tokens,
+                max_output_tokens=max_output_tokens,
                 api_key=api_key
             )
         
@@ -53,7 +51,7 @@ def get_model(temperature: float = 0.7, max_output_tokens: int = None):
             return ChatGoogleGenerativeAI(
                 model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
-                max_output_tokens=out_tokens,
+                max_output_tokens=max_output_tokens,
                 vertexai=True,
                 project=project_id,
                 location="global",
@@ -63,17 +61,18 @@ def get_model(temperature: float = 0.7, max_output_tokens: int = None):
     return None
 
 
-def route_query(query: str) -> str:
+def route_query(query: str, max_tokens: int = 65535) -> str:
     """
     Clasifica la intención del usuario en una categoría.
     
     Args:
         query: Texto de la consulta del usuario.
+        max_tokens: Límite de tokens para el modelo (p. ej. st.session_state["max_tokens"]).
     
     Returns:
         Categoría de la query: CONVERSACION, PREGUNTA_DOCUMENTO, RESUMEN, APRENDIZAJE, OTRO
     """
-    llm = get_model(temperature=0.1)
+    llm = get_model(temperature=0.1, max_output_tokens=max_tokens)
     if not llm:
         # Si no hay modelo, asumir pregunta de documento por defecto
         return QueryCategory.PREGUNTA_DOCUMENTO.value
@@ -118,7 +117,7 @@ CATEGORÍA:"""
         return QueryCategory.PREGUNTA_DOCUMENTO.value
 
 
-def get_direct_response(query: str, session_id: str = None, user_facts: str = "") -> str:
+def get_direct_response(query: str, session_id: str = None, user_facts: str = "", max_tokens: int = 65535) -> str:
     """
     Genera una respuesta directa para conversaciones sin usar RAG.
     
@@ -126,11 +125,12 @@ def get_direct_response(query: str, session_id: str = None, user_facts: str = ""
         query: Consulta del usuario.
         session_id: ID de sesión del usuario.
         user_facts: Hechos conocidos del usuario (formateados).
+        max_tokens: Límite de tokens (p. ej. st.session_state["max_tokens"]).
     
     Returns:
         Respuesta generada.
     """
-    llm = get_model(temperature=0.7)
+    llm = get_model(temperature=0.7, max_output_tokens=max_tokens)
     if not llm:
         return "Lo siento, no puedo responder en este momento."
     
@@ -157,7 +157,7 @@ RESPUESTA:"""
         return f"Error al generar respuesta: {str(e)}"
 
 
-def get_summary_response(query: str, vector_store, session_id: str = None) -> Dict[str, Any]:
+def get_summary_response(query: str, vector_store, session_id: str = None, max_tokens: int = 65535) -> Dict[str, Any]:
     """
     Genera un resumen del contenido de los documentos.
     
@@ -165,11 +165,12 @@ def get_summary_response(query: str, vector_store, session_id: str = None) -> Di
         query: Consulta del usuario.
         vector_store: Vector store con los documentos.
         session_id: ID de sesión del usuario.
+        max_tokens: Límite de tokens (p. ej. st.session_state["max_tokens"]).
     
     Returns:
         Diccionario con 'answer' y 'source_documents'.
     """
-    llm = get_model(temperature=0.3)
+    llm = get_model(temperature=0.3, max_output_tokens=max_tokens)
     if not llm:
         return {"answer": "No puedo generar el resumen en este momento.", "source_documents": []}
     
@@ -224,10 +225,11 @@ class LearningFlowManager:
     Mantiene el estado de la sesión de aprendizaje.
     """
     
-    def __init__(self, vector_store, session_id: str = None):
+    def __init__(self, vector_store, session_id: str = None, max_tokens: int = 65535):
         self.vector_store = vector_store
         self.session_id = session_id
-        self.llm = get_model(temperature=0.3)
+        self.max_tokens = max_tokens
+        self.llm = get_model(temperature=0.3, max_output_tokens=max_tokens)
     
     def start_learning_session(self, topic_query: str) -> Dict[str, Any]:
         """

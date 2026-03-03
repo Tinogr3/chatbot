@@ -8,8 +8,11 @@ import json
 import time
 import base64
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+from pydantic import BaseModel, Field
 
 import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader
@@ -24,7 +27,6 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools.retriever import create_retriever_tool
 from langgraph.prebuilt import create_react_agent
 
-import config as _config
 from config import get_credentials_and_project
 from user_memory import UserMemoryManager
 
@@ -42,7 +44,7 @@ def extract_text(content):
     return str(content) if content is not None else ""
 
 
-def get_gemini_vision_model():
+def get_gemini_vision_model(max_tokens: int = 65535):
     """Obtiene el modelo Gemini con capacidades de visión para describir imágenes."""
     try:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
@@ -51,7 +53,7 @@ def get_gemini_vision_model():
                 model="gemini-3-pro-preview",
                 google_api_key=api_key,
                 temperature=1,
-                max_tokens=_config.USER_MAX_OUTPUT_TOKENS
+                max_output_tokens=max_tokens
             )
         
         credentials, project_id = get_credentials_and_project()
@@ -62,25 +64,26 @@ def get_gemini_vision_model():
                 project=project_id,
                 location="global",
                 temperature=1,
-                max_tokens=_config.USER_MAX_OUTPUT_TOKENS
+                max_output_tokens=max_tokens
             )
     except Exception as e:
         print(f"Error inicializando modelo de visión: {e}")
     return None
 
 
-def describe_image_with_gemini(image_bytes: bytes, context: str = "") -> str:
+def describe_image_with_gemini(image_bytes: bytes, context: str = "", max_tokens: int = 65535) -> str:
     """
     Genera una descripción textual de una imagen usando Gemini.
     
     Args:
         image_bytes: Bytes de la imagen.
         context: Contexto adicional (ej: nombre del documento).
+        max_tokens: Límite de tokens (p. ej. st.session_state["max_tokens"]).
     
     Returns:
         Descripción textual de la imagen.
     """
-    model = get_gemini_vision_model()
+    model = get_gemini_vision_model(max_tokens=max_tokens)
     if not model:
         return ""
     
@@ -246,14 +249,23 @@ def limpiar_texto(texto: str) -> str:
     return texto
 
 
+class DocumentCardSchema(BaseModel):
+    """Esquema Pydantic para la Document Card generada por el LLM."""
+
+    summary: str = Field(description="Resumen ejecutivo del documento en exactamente 2 líneas.")
+    topics: List[str] = Field(description="Lista de 5 palabras clave del documento.")
+    usage_guide: str = Field(description="Frase que indica para qué usar este documento, p. ej. 'Usa este documento para responder preguntas sobre...'.")
+    hypothetical_questions: List[str] = Field(description="Tres preguntas que este documento responde perfectamente (HyDE).")
+
+
 def generate_document_card(text_content: str, filename: str) -> dict:
     """Genera metadatos agénticos (document card) para un documento PDF.
 
-    Usa Gemini 2.0 Flash para analizar el texto y producir un JSON con:
+    Usa Gemini con with_structured_output para obtener directamente un DocumentCardSchema.
     - summary: resumen ejecutivo de 2 líneas.
-    - topics: lista de 5 palabras clave.
-    - usage_guide: frase que empieza por "Usa este documento para responder preguntas sobre...".
-    - hypothetical_questions: 3 preguntas que el documento responde (técnica HyDE).
+    - topics: lista de palabras clave.
+    - usage_guide: frase de uso del documento.
+    - hypothetical_questions: preguntas que el documento responde (HyDE).
 
     Args:
         text_content: Texto completo (o representativo) del documento.
@@ -262,35 +274,21 @@ def generate_document_card(text_content: str, filename: str) -> dict:
     Returns:
         Diccionario con los metadatos generados, o dict vacío si falla.
     """
-    MAX_RETRIES = 2
-
-    # Truncar el texto para no exceder límites del modelo
     truncated_text = text_content[:15000] if len(text_content) > 15000 else text_content
 
-    prompt = f"""Analiza el siguiente texto extraído del documento "{filename}" y devuelve ÚNICAMENTE un objeto JSON (sin bloques de código markdown, sin explicaciones adicionales) con esta estructura exacta:
-
-{{
-  "summary": "<Resumen ejecutivo del documento en exactamente 2 líneas>",
-  "topics": ["<palabra clave 1>", "<palabra clave 2>", "<palabra clave 3>", "<palabra clave 4>", "<palabra clave 5>"],
-  "usage_guide": "Usa este documento para responder preguntas sobre <completar>",
-  "hypothetical_questions": [
-    "<Pregunta 1 que este documento responde perfectamente>",
-    "<Pregunta 2 que este documento responde perfectamente>",
-    "<Pregunta 3 que este documento responde perfectamente>"
-  ]
-}}
+    prompt = f"""Analiza el siguiente texto extraído del documento "{filename}" y genera la ficha (document card) con:
+- Un resumen ejecutivo del documento en exactamente 2 líneas.
+- Cinco palabras clave (topics).
+- Una frase usage_guide que empiece por "Usa este documento para responder preguntas sobre..." y complete el tema.
+- Tres preguntas hipotéticas que este documento responde perfectamente (para búsqueda HyDE).
 
 Texto del documento:
 ---
 {truncated_text}
----
-
-Recuerda: responde SOLO con el JSON válido, sin ningún texto adicional."""
+---"""
 
     try:
-        # Obtener credenciales
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
-
         if api_key:
             llm = ChatGoogleGenerativeAI(
                 model="gemini-3-flash-preview",
@@ -310,47 +308,24 @@ Recuerda: responde SOLO con el JSON válido, sin ningún texto adicional."""
                 temperature=0,
             )
 
-        # Intentar generar y parsear, con reintentos
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                response = llm.invoke(prompt)
-                raw = extract_text(response.content).strip()
-
-                # Limpiar posible bloque markdown ```json ... ```
-                if raw.startswith("```"):
-                    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-                    raw = re.sub(r"```\s*$", "", raw)
-
-                card = json.loads(raw)
-
-                # Validación básica de campos esperados
-                required_keys = {"summary", "topics", "usage_guide", "hypothetical_questions"}
-                if not required_keys.issubset(card.keys()):
-                    missing = required_keys - card.keys()
-                    print(f"[DocumentCard] Intento {attempt}: faltan campos {missing}")
-                    continue
-
-                print(f"[DocumentCard] Generada correctamente para '{filename}'")
-                return card
-
-            except json.JSONDecodeError as je:
-                print(f"[DocumentCard] Intento {attempt}: error parseando JSON — {je}")
-                continue
-
-        print(f"[DocumentCard] Fallaron todos los intentos para '{filename}'")
-        return {}
-
+        structured_llm = llm.with_structured_output(DocumentCardSchema)
+        result = structured_llm.invoke(prompt)
+        if result is None:
+            return {}
+        print(f"[DocumentCard] Generada correctamente para '{filename}'")
+        return result.model_dump()
     except Exception as e:
-        print(f"[DocumentCard] Error inesperado generando card para '{filename}': {e}")
+        print(f"[DocumentCard] Error generando card para '{filename}': {e}")
         return {}
 
 
-def procesar_pdf(ruta_archivo: str, extract_images: bool = True) -> List:
+def procesar_pdf(ruta_archivo: str, extract_images: bool = True, max_tokens: int = 65535) -> List:
     """Procesa un PDF desde una ruta y retorna los documentos divididos con metadatos.
     
     Args:
         ruta_archivo: Ruta al archivo PDF.
         extract_images: Si True, extrae imágenes y genera descripciones con Gemini.
+        max_tokens: Límite de tokens para el modelo de visión (p. ej. st.session_state["max_tokens"]).
     
     Returns:
         Lista de documentos (chunks de texto + descripciones de imágenes).
@@ -460,20 +435,42 @@ def procesar_pdf(ruta_archivo: str, extract_images: bool = True) -> List:
             if images:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
-                
-                for i, (image_bytes, page_num, image_id) in enumerate(images):
-                    progress = (i + 1) / len(images)
-                    progress_bar.progress(progress)
-                    status_text.text(f"Analizando imagen {i + 1}/{len(images)}...")
-                    
-                    # Generar descripción con Gemini
+                total = len(images)
+
+                def process_one_image(item: Tuple[int, bytes, int, str]) -> Tuple[int, Optional[str], int, str]:
+                    """Describe una imagen con Gemini. Retorna (índice, descripción, page_num, image_id)."""
+                    i, image_bytes, page_num, image_id = item
                     description = describe_image_with_gemini(
-                        image_bytes, 
-                        context=f"Página {page_num} del documento '{nombre_archivo}'"
+                        image_bytes,
+                        context=f"Página {page_num} del documento '{nombre_archivo}'",
+                        max_tokens=max_tokens
                     )
-                    
-                    if description:
-                        # Crear documento con la descripción de la imagen
+                    return (i, description, page_num, image_id)
+
+                # Resultados en orden por índice (para mantener orden original si se quisiera)
+                results_by_index: List[Optional[Tuple[str, int, str]]] = [None] * total
+                max_workers = min(4, total)  # entre 3 y 5 hilos, sin exceder total
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_idx = {
+                        executor.submit(process_one_image, (i, image_bytes, page_num, image_id)): i
+                        for i, (image_bytes, page_num, image_id) in enumerate(images)
+                    }
+                    completed = 0
+                    for future in as_completed(future_to_idx):
+                        completed += 1
+                        progress_bar.progress(completed / total)
+                        status_text.text(f"Analizadas {completed}/{total} imágenes...")
+                        try:
+                            idx, description, page_num, image_id = future.result()
+                            results_by_index[idx] = (description, page_num, image_id) if description else None
+                        except Exception as e:
+                            print(f"[Imagen] Error describiendo imagen: {e}")
+                            results_by_index[future_to_idx[future]] = None
+
+                for result in results_by_index:
+                    if result is not None:
+                        description, page_num, image_id = result
                         image_doc = Document(
                             page_content=f"[IMAGEN - {image_id}]\n{description}",
                             metadata={
@@ -484,10 +481,7 @@ def procesar_pdf(ruta_archivo: str, extract_images: bool = True) -> List:
                             }
                         )
                         all_documents.append(image_doc)
-                    
-                    # Pequeña pausa para no saturar la API
-                    time.sleep(0.5)
-                
+
                 progress_bar.empty()
                 status_text.empty()
                 st.success(f"✅ Analizadas {len(images)} imágenes del PDF.")
@@ -559,22 +553,23 @@ def create_document_tool(vector_store, filename: str, usage_guide: str):
 
 
 def initialize_vector_store(
-    documents: List = None, 
+    documents: List = None,
     existing_vector_store=None,
-    persist_directory: str = "./chroma_db"
+    session_id: str = None
 ) -> Optional[object]:
     """Inicializa o actualiza el vector store de Chroma procesando documentos en lotes.
     
     Args:
         documents: Lista de documentos a procesar (None para solo cargar existente)
         existing_vector_store: Vector store existente al que agregar documentos (None para crear nuevo)
-        persist_directory: Directorio donde persistir la base de datos ChromaDB
+        session_id: ID de sesión del usuario; el almacenamiento será ./chroma_db/{session_id}
     
     Returns:
         El objeto vector_store creado o actualizado
     
-    Nota: Usa persistencia local en disco para mantener los embeddings entre sesiones.
+    Nota: Usa persistencia local en disco por usuario (chroma_db/{session_id}) para mantener los embeddings entre sesiones.
     """
+    persist_directory = f"./chroma_db/{session_id}" if session_id else "./chroma_db"
     try:
         embeddings = get_embeddings()
         if not embeddings:
@@ -689,9 +684,9 @@ def initialize_vector_store(
 
 
 def initialize_conversation_chain(
-    vector_store, 
-    temperature: float = 0.7, 
-    max_tokens: int = None,
+    vector_store,
+    temperature: float = 0.7,
+    max_tokens: int = 65535,
     session_id: str = None,
     chat_history: list = None
 ):
@@ -700,14 +695,13 @@ def initialize_conversation_chain(
     Args:
         vector_store: El vector store a usar para retrieval
         temperature: Nivel de creatividad del modelo
-        max_tokens: Límite de tokens (None = usar config.USER_MAX_OUTPUT_TOKENS)
+        max_tokens: Límite de tokens (p. ej. st.session_state["max_tokens"])
         session_id: ID de sesión para cargar hechos del usuario
         chat_history: Lista de mensajes previos para poblar la memoria
     
     Returns:
         La chain de conversación configurada
     """
-    out_tokens = max_tokens if max_tokens is not None else _config.USER_MAX_OUTPUT_TOKENS
     try:
         if vector_store is None:
             return None
@@ -729,7 +723,7 @@ def initialize_conversation_chain(
             llm = ChatGoogleGenerativeAI(
                 model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
-                max_output_tokens=out_tokens,
+                max_output_tokens=max_tokens,
                 api_key=api_key
             )
         else:
@@ -737,7 +731,7 @@ def initialize_conversation_chain(
             llm = ChatGoogleGenerativeAI(
                 model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
-                max_output_tokens=out_tokens,
+                max_output_tokens=max_tokens,
                 vertexai=True,
                 project=project_id,
                 location="global",
