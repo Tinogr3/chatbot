@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Arranca backend (en segundo plano) y frontend con un solo comando.
 # Al salir (Ctrl+C o cerrar Streamlit), se detiene también el backend.
+#
+# Para procesamiento asíncrono de PDFs y videos (Celery):
+#   1. Inicia Redis: redis-server (o docker run -p 6379:6379 redis)
+#   2. En otra terminal, desde la raíz del proyecto: celery -A backend.worker worker --loglevel=info
+#   Opcional: CELERY_BROKER_URL=redis://localhost:6379/0 en .env
 
 set -e
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -12,6 +17,12 @@ if [[ ! -d "venv" ]]; then
 fi
 
 source venv/bin/activate
+
+# Asegurar dependencias del backend (celery, redis, etc.) para que uvicorn arranque
+if ! python -c "import celery" 2>/dev/null; then
+  echo "Instalando dependencias del backend (incl. Celery/Redis)..."
+  pip install -q -r backend/requirements.txt
+fi
 
 # Puerto del backend (por si quieres cambiarlo)
 BACKEND_PORT="${BACKEND_PORT:-8000}"

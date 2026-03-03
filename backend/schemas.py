@@ -1,7 +1,7 @@
 """
 Modelos Pydantic estrictos para inputs/outputs de la API y del RAG.
 """
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -63,6 +63,25 @@ class ProcessVideoResponse(BaseModel):
     document_count: int = Field(..., ge=0, description="Chunks generados de la transcripción")
     video_id: Optional[str] = Field(None, description="ID del video de YouTube")
     message: str = Field(..., description="Mensaje para el usuario")
+
+
+# ----- Tareas asíncronas (Celery) -----
+class TaskEnqueuedResponse(BaseModel):
+    """Response cuando se encola una tarea (upload o process_video)."""
+
+    task_id: str = Field(..., description="ID de la tarea para consultar estado")
+    message: str = Field(default="Tarea encolada. Usa GET /status/{task_id} para el progreso.")
+
+
+class TaskStatusResponse(BaseModel):
+    """Response de GET /status/{task_id}."""
+
+    task_id: str = Field(..., description="ID de la tarea")
+    status: str = Field(..., description="PENDING | PROGRESS | SUCCESS | FAILURE")
+    progress: float = Field(default=0.0, ge=0.0, le=1.0, description="Progreso 0.0–1.0")
+    message: Optional[str] = Field(None, description="Mensaje de estado o etapa actual")
+    result: Optional[Dict[str, Any]] = Field(None, description="Resultado si status=SUCCESS")
+    error: Optional[str] = Field(None, description="Error si status=FAILURE")
 
 
 # ----- History -----

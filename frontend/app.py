@@ -4,12 +4,14 @@ Solo UI y st.session_state; toda la lógica pesada está en el backend vía API.
 """
 import os
 import logging
+import time
 
 import streamlit as st
 
 from api_client import (
     chat as api_chat,
     upload_pdf,
+    get_task_status,
     load_cloud_pdfs,
     process_video as api_process_video,
     get_history as api_get_history,
@@ -22,6 +24,33 @@ from utils import format_timestamp, extract_video_id, is_youtube_url
 logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Chatbot RAG Educativo", page_icon="📚", layout="wide")
+
+
+def poll_task_until_done(task_id: str, label: str = "Procesando..."):
+    """
+    Hace polling a GET /status/{task_id}, muestra st.progress y mensaje.
+    Devuelve (success: bool, result: dict | None, error: str | None).
+    """
+    progress_bar = st.progress(0.0, text=label)
+    status_placeholder = st.empty()
+    try:
+        while True:
+            resp = get_task_status(task_id)
+            status = resp.get("status", "PENDING")
+            progress = float(resp.get("progress", 0.0))
+            message = resp.get("message") or status
+            progress_bar.progress(progress, text=message)
+            status_placeholder.caption(message)
+            if status == "SUCCESS":
+                progress_bar.progress(1.0, text="Completado")
+                return True, resp.get("result"), None
+            if status == "FAILURE":
+                progress_bar.progress(1.0, text="Error")
+                return False, None, resp.get("error") or "Error desconocido"
+            time.sleep(1.5)
+    finally:
+        progress_bar.empty()
+        status_placeholder.empty()
 
 # --- Sesión ---
 if "session_id" not in st.session_state:
@@ -203,20 +232,25 @@ with st.sidebar:
         st.info("Solo se consideran los archivos que subas manualmente en esta sesión.")
         uploaded_file = st.file_uploader("Selecciona un archivo PDF", type=["pdf"], help="Sube un PDF para procesarlo.")
         if uploaded_file is not None and st.button("Procesar y Subir PDF"):
-            with st.spinner("Procesando documento..."):
-                try:
-                    content = uploaded_file.read()
-                    resp = upload_pdf(content, uploaded_file.name, session_id)
-                    if resp.get("success"):
-                        fn = resp.get("filename", uploaded_file.name)
+            try:
+                content = uploaded_file.read()
+                resp = upload_pdf(content, uploaded_file.name, session_id)
+                task_id = resp.get("task_id")
+                if not task_id:
+                    st.error(resp.get("message", "No se recibió task_id."))
+                else:
+                    success, result, err = poll_task_until_done(task_id, "Procesando PDF...")
+                    if success and result and result.get("success"):
+                        fn = result.get("filename", uploaded_file.name)
                         if fn not in st.session_state.archivos_manuales:
                             st.session_state.archivos_manuales.append(fn)
-                        st.success(resp.get("message", "✅ Archivo cargado."))
-                        st.info(f"Se generaron {resp.get('document_count', 0)} chunks.")
-                    else:
-                        st.error(resp.get("message", "Error al procesar."))
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                        st.success(result.get("message", "✅ Archivo cargado."))
+                        st.info(f"Se generaron {result.get('document_count', 0)} chunks.")
+                    elif not success or (result and not result.get("success")):
+                        st.error(err or result.get("error") if result else err or "Error al procesar.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
                 st.rerun()
         if st.session_state.archivos_manuales:
             st.subheader("📚 Archivos Manuales")
@@ -246,18 +280,25 @@ with st.sidebar:
         st.markdown("#### 📤 Subir Archivo Manual")
         uploaded_file = st.file_uploader("Selecciona un archivo PDF", type=["pdf"], key="hybrid_upload")
         if uploaded_file is not None and st.button("Procesar y Subir PDF"):
-            with st.spinner("Procesando..."):
-                try:
-                    resp = upload_pdf(uploaded_file.read(), uploaded_file.name, session_id)
-                    if resp.get("success"):
-                        fn = resp.get("filename", uploaded_file.name)
+            try:
+                content = uploaded_file.read()
+                resp = upload_pdf(content, uploaded_file.name, session_id)
+                task_id = resp.get("task_id")
+                if not task_id:
+                    st.error(resp.get("message", "No se recibió task_id."))
+                else:
+                    success, result, err = poll_task_until_done(task_id, "Procesando PDF...")
+                    if success and result and result.get("success"):
+                        fn = result.get("filename", uploaded_file.name)
                         if fn not in st.session_state.archivos_manuales:
                             st.session_state.archivos_manuales.append(fn)
-                        st.success(resp.get("message", ""))
-                    else:
-                        st.error(resp.get("message", ""))
-                except Exception as e:
-                    st.error(str(e))
+                        st.success(result.get("message", "✅ Archivo cargado."))
+                        st.info(f"Se generaron {result.get('document_count', 0)} chunks.")
+                    elif not success or (result and not result.get("success")):
+                        st.error(err or result.get("error") if result else err or "Error al procesar.")
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
                 st.rerun()
         if st.session_state.archivos_manuales:
             for f in st.session_state.archivos_manuales:
@@ -269,19 +310,24 @@ with st.sidebar:
     youtube_url = st.text_input("URL del video de YouTube", placeholder="https://www.youtube.com/watch?v=...")
     if youtube_url and st.button("🎥 Procesar Video"):
         if is_youtube_url(youtube_url):
-            with st.spinner("Extrayendo transcripción del video..."):
-                try:
-                    resp = api_process_video(youtube_url, session_id)
-                    if resp.get("success"):
+            try:
+                resp = api_process_video(youtube_url, session_id)
+                task_id = resp.get("task_id")
+                if not task_id:
+                    st.warning(resp.get("message", "No se recibió task_id."))
+                else:
+                    success, result, err = poll_task_until_done(task_id, "Extrayendo transcripción del video...")
+                    if success and result and result.get("success"):
                         if youtube_url not in st.session_state.videos_procesados:
                             st.session_state.videos_procesados.append(youtube_url)
                         st.success("✅ Video procesado correctamente.")
-                        st.info(f"Se generaron {resp.get('document_count', 0)} chunks con timestamps.")
-                    else:
-                        st.warning(resp.get("message", ""))
-                except Exception as e:
-                    st.error(str(e))
-            st.rerun()
+                        st.info(f"Se generaron {result.get('document_count', 0)} chunks con timestamps.")
+                    elif not success or (result and not result.get("success")):
+                        st.error(err or (result.get("error") if result else resp.get("message", "Error al procesar el video.")))
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
+                st.rerun()
         else:
             st.error("Por favor, introduce una URL válida de YouTube.")
     if st.session_state.videos_procesados:

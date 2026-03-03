@@ -1,6 +1,7 @@
 """
-Endpoints de subida de PDFs - POST /upload, POST /upload/load_cloud
+Endpoints de subida de PDFs - POST /upload (asíncrono), POST /upload/load_cloud
 """
+import base64
 import os
 import tempfile
 from typing import Optional
@@ -9,21 +10,21 @@ from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 
 from api.chat import invalidate_agent_cache
 from document_registry import load_document_registry, save_document_registry
-from exceptions import DocumentProcessingError
 from gcs_utils import procesar_todos_pdfs_nube, upload_to_gcs
 from logger import get_logger
-from rag_engine import initialize_vector_store, procesar_pdf
-from schemas import LoadCloudResponse, UploadResponse
+from rag_engine import initialize_vector_store
+from schemas import LoadCloudResponse, TaskEnqueuedResponse
 
 logger = get_logger("api.upload")
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 
-@router.post("", response_model=UploadResponse)
+@router.post("", response_model=TaskEnqueuedResponse)
 async def upload_pdf(
     file: UploadFile = File(...),
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
-) -> UploadResponse:
+) -> TaskEnqueuedResponse:
+    """Encola el procesamiento del PDF y devuelve task_id. Consultar GET /status/{task_id} para progreso."""
     session_id = (x_session_id or "").strip().lower().replace(" ", "_")
     if not session_id:
         raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
@@ -33,62 +34,20 @@ async def upload_pdf(
     content = await file.read()
     filename = file.filename
 
-    # GCS es opcional: si no hay credenciales simplemente se omite
     gcs_path = upload_to_gcs(content, filename)
     if gcs_path:
         logger.info("Archivo subido a GCS: %s", gcs_path)
-    else:
-        logger.info("GCS no configurado o no disponible; procesando solo en local.")
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
-    try:
-        registry = load_document_registry(session_id)
-        documents, registry = procesar_pdf(
-            tmp_path,
-            extract_images=True,
-            max_tokens=65535,
-            session_id=session_id,
-            document_registry=registry,
-        )
-    except DocumentProcessingError as e:
-        logger.exception("Document processing failed: %s", e.message)
-        raise HTTPException(status_code=500, detail=e.message) from e
-    except Exception as e:
-        logger.exception("Error processing PDF: %s", e)
-        raise HTTPException(status_code=500, detail=f"Error procesando PDF: {str(e)}") from e
-    finally:
-        os.unlink(tmp_path)
+    from worker import process_pdf_task
 
-    if not documents:
-        return UploadResponse(
-            success=False,
-            gcs_path=gcs_path,
-            filename=filename,
-            document_count=0,
-            message="No se pudieron extraer documentos del PDF.",
-        )
-
-    save_document_registry(session_id, registry)
-
-    existing_vs = initialize_vector_store(documents=None, session_id=session_id)
-    vector_store = initialize_vector_store(
-        documents=documents,
-        existing_vector_store=existing_vs,
-        session_id=session_id,
-    )
-    if not vector_store:
-        raise HTTPException(status_code=500, detail="Error al crear/actualizar vector store")
-
-    invalidate_agent_cache(session_id)
-    return UploadResponse(
-        success=True,
-        gcs_path=gcs_path,
+    file_content_b64 = base64.b64encode(content).decode("utf-8")
+    task = process_pdf_task.delay(
+        file_content_b64=file_content_b64,
         filename=filename,
-        document_count=len(documents),
-        message=f"Archivo '{filename}' procesado correctamente.",
+        session_id=session_id,
+        gcs_path=gcs_path,
     )
+    return TaskEnqueuedResponse(task_id=task.id, message="PDF encolado. Consulta GET /status/{task_id} para el progreso.")
 
 
 @router.post("/load_cloud", response_model=LoadCloudResponse)

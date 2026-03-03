@@ -32,6 +32,7 @@ from api.video import router as video_router
 from api.history import router as history_router
 from api.user_facts import router as user_facts_router
 from api.session import router as session_router
+from api.tasks import router as tasks_router
 
 setup_logging()
 
@@ -55,6 +56,7 @@ app.include_router(video_router)
 app.include_router(history_router)
 app.include_router(user_facts_router)
 app.include_router(session_router)
+app.include_router(tasks_router)
 
 
 @app.get("/health")

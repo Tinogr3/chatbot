@@ -47,13 +47,21 @@ def chat(
 
 
 def upload_pdf(file_content: bytes, filename: str, session_id: str) -> Dict[str, Any]:
-    """POST /upload (multipart)"""
+    """POST /upload (multipart). Devuelve { task_id, message } (procesamiento asíncrono)."""
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
         r = client.post(
             f"{BACKEND_URL}/upload",
             files={"file": (filename, file_content, "application/pdf")},
             headers={"X-Session-Id": session_id},
         )
+        r.raise_for_status()
+        return r.json()
+
+
+def get_task_status(task_id: str) -> Dict[str, Any]:
+    """GET /status/{task_id}. Devuelve status, progress (0–1), message, result o error."""
+    with httpx.Client(timeout=30.0) as client:
+        r = client.get(f"{BACKEND_URL}/status/{task_id}")
         r.raise_for_status()
         return r.json()
 
@@ -70,7 +78,7 @@ def load_cloud_pdfs(session_id: str) -> Dict[str, Any]:
 
 
 def process_video(url: str, session_id: str) -> Dict[str, Any]:
-    """POST /process_video"""
+    """POST /process_video. Devuelve { task_id, message } (procesamiento asíncrono)."""
     with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
         r = client.post(
             f"{BACKEND_URL}/process_video",
