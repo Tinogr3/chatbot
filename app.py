@@ -5,6 +5,7 @@ Interfaz de usuario que coordina los módulos de configuración, RAG y GCS.
 import os
 import tempfile
 import uuid
+import json
 
 import streamlit as st
 
@@ -17,6 +18,7 @@ from config import BUCKET_NAME
 from rag_engine import (
     initialize_vector_store,
     initialize_conversation_chain,
+    initialize_agent,
     procesar_pdf
 )
 from gcs_utils import (
@@ -48,6 +50,28 @@ st.set_page_config(
 # Inicializar gestor de historial de chat y memoria de usuario
 chat_manager = ChatHistoryManager()
 user_memory = UserMemoryManager()
+
+def _message_content_to_str(content) -> str:
+    """Convierte el content de un AIMessage a string (puede ser str o lista de bloques)."""
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict):
+                if "text" in item:
+                    text_parts.append(item["text"])
+                elif "parts" in item:
+                    for p in item["parts"] if isinstance(item["parts"], list) else []:
+                        if isinstance(p, str):
+                            text_parts.append(p)
+                        elif isinstance(p, dict) and "text" in p:
+                            text_parts.append(p["text"])
+            elif isinstance(item, str):
+                text_parts.append(item)
+        return "".join(text_parts)
+    return str(content)
+
 
 # Verificar si el usuario ya inició sesión
 if "session_id" not in st.session_state:
@@ -129,6 +153,9 @@ if "vector_store" not in st.session_state:
 if "conversation_chain" not in st.session_state:
     st.session_state.conversation_chain = None
 
+if "agent" not in st.session_state:
+    st.session_state.agent = None
+
 if "processed_files" not in st.session_state:
     st.session_state.processed_files = []
 
@@ -138,6 +165,12 @@ if "archivo_activo" not in st.session_state:
 if "modo_operacion" not in st.session_state:
     st.session_state.modo_operacion = "Nube Automático"
 
+if "max_tokens" not in st.session_state:
+    st.session_state.max_tokens = 65535
+# Sincronizar límite de tokens con config para router/rag/user_memory (por si el sidebar no ha corrido aún)
+import config as _app_config
+_app_config.USER_MAX_OUTPUT_TOKENS = st.session_state.get("max_tokens", 65535)
+
 if "archivos_manuales" not in st.session_state:
     st.session_state.archivos_manuales = []
 
@@ -146,6 +179,20 @@ if "archivos_nube" not in st.session_state:
 
 if "videos_procesados" not in st.session_state:
     st.session_state.videos_procesados = []
+
+if "document_registry" not in st.session_state:
+    # Intentar cargar desde archivo persistido
+    registry_path = "document_registry.json"
+    try:
+        if os.path.exists(registry_path):
+            with open(registry_path, 'r', encoding='utf-8') as f:
+                st.session_state.document_registry = json.load(f)
+                print(f"[Registry] Cargado document_registry con {len(st.session_state.document_registry)} documentos")
+        else:
+            st.session_state.document_registry = {}
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"[Registry] Error cargando document_registry.json: {e}")
+        st.session_state.document_registry = {}
 
 # Variables para modo aprendizaje
 if "learning_mode" not in st.session_state:
@@ -168,6 +215,7 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.vector_store = None
         st.session_state.conversation_chain = None
+        st.session_state.agent = None
         st.rerun()
     
     st.divider()
@@ -245,6 +293,7 @@ with st.sidebar:
         st.session_state.modo_operacion = modo_operacion
         st.session_state.vector_store = None
         st.session_state.conversation_chain = None
+        st.session_state.agent = None
         # Limpiar historial en memoria y en base de datos
         chat_manager.delete_history(st.session_state.session_id)
         st.session_state.messages = []
@@ -276,8 +325,9 @@ with st.sidebar:
                         st.success(f"✅ {len(filenames)} archivos cargados desde la nube.")
                         st.info(f"Se generaron {len(documents)} chunks con embeddings.")
                         
-                        # Reinicializar la cadena de conversación
+                        # Reinicializar la cadena de conversación y agente
                         st.session_state.conversation_chain = None
+                        st.session_state.agent = None
                         st.rerun()
                     else:
                         st.error("Error al crear el vector store.")
@@ -344,9 +394,10 @@ with st.sidebar:
                                 st.success(f"✅ Archivo '{filename}' cargado y listo para chatear.")
                                 st.info(f"Se generaron {len(documents)} chunks con embeddings.")
 
-                                # Reinicializar la cadena de conversación si existe
-                                if st.session_state.conversation_chain:
+                                # Reinicializar la cadena de conversación y agente si existen
+                                if st.session_state.conversation_chain or st.session_state.agent:
                                     st.session_state.conversation_chain = None
+                                    st.session_state.agent = None
                                     st.info("Reinicia el chat para usar el nuevo documento.")
                             else:
                                 st.error("Error al crear el vector store.")
@@ -385,8 +436,9 @@ with st.sidebar:
                         # Actualizar lista de archivos procesados
                         st.session_state.processed_files = st.session_state.archivos_nube.copy() + st.session_state.archivos_manuales.copy()
                         
-                        # Reinicializar la cadena de conversación
+                        # Reinicializar la cadena de conversación y agente
                         st.session_state.conversation_chain = None
+                        st.session_state.agent = None
                         st.rerun()
                     else:
                         st.error("Error al crear el vector store.")
@@ -450,9 +502,10 @@ with st.sidebar:
                                 st.success(f"✅ Archivo '{filename}' cargado y listo para chatear.")
                                 st.info(f"Se generaron {len(documents)} chunks con embeddings.")
 
-                                # Reinicializar la cadena de conversación si existe
-                                if st.session_state.conversation_chain:
+                                # Reinicializar la cadena de conversación y agente si existen
+                                if st.session_state.conversation_chain or st.session_state.agent:
                                     st.session_state.conversation_chain = None
+                                    st.session_state.agent = None
                                     st.info("Reinicia el chat para usar el nuevo documento.")
                             else:
                                 st.error("Error al crear el vector store.")
@@ -504,8 +557,9 @@ with st.sidebar:
                                 st.success(f"✅ Video procesado correctamente.")
                                 st.info(f"Se generaron {len(documents)} chunks con timestamps.")
                                 
-                                # Reinicializar la cadena de conversación
+                                # Reinicializar la cadena de conversación y agente
                                 st.session_state.conversation_chain = None
+                                st.session_state.agent = None
                             else:
                                 st.error("Error al agregar video al vector store.")
                         else:
@@ -533,9 +587,10 @@ with st.sidebar:
         chat_manager.delete_history(st.session_state.session_id)
         st.session_state.messages = []
         
-        # Limpiar el vector store y la cadena de conversación
+        # Limpiar el vector store, la cadena de conversación y el agente
         st.session_state.vector_store = None
         st.session_state.conversation_chain = None
+        st.session_state.agent = None
         
         # Limpiar archivos procesados
         st.session_state.processed_files = []
@@ -543,6 +598,15 @@ with st.sidebar:
         st.session_state.archivos_nube = []
         st.session_state.videos_procesados = []
         st.session_state.archivo_activo = None
+        st.session_state.document_registry = {}
+        
+        # Eliminar archivo de registro persistido
+        try:
+            if os.path.exists('document_registry.json'):
+                os.remove('document_registry.json')
+                print("[Registry] Eliminado document_registry.json")
+        except OSError as e:
+            print(f"[Registry] Error eliminando document_registry.json: {e}")
         
         # Nota: El historial se elimina de la base de datos SQLite
         
@@ -567,23 +631,29 @@ with st.sidebar:
         "Límite de Tokens",
         min_value=256,
         max_value=65535,
-        value=65535,
+        value=st.session_state.get("max_tokens", 65535),
         step=256,
         help="Número máximo de tokens en la respuesta"
     )
-    
+    st.session_state["max_tokens"] = max_tokens
+    # Actualizar config para que router/rag_engine/user_memory usen este valor
+    import config as _config
+    _config.USER_MAX_OUTPUT_TOKENS = max_tokens
+
     # Botón para aplicar cambios
     if st.button("🔄 Aplicar Parámetros"):
         if st.session_state.vector_store:
-            with st.spinner("Reinicializando modelo con nuevos parámetros..."):
-                st.session_state.conversation_chain = initialize_conversation_chain(
+            with st.spinner("Reinicializando agente con nuevos parámetros..."):
+                st.session_state.agent = initialize_agent(
                     vector_store=st.session_state.vector_store,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     session_id=st.session_state.session_id,
-                    chat_history=st.session_state.messages
+                    chat_history=st.session_state.messages,
+                    document_registry=st.session_state.document_registry
                 )
-                if st.session_state.conversation_chain:
+                st.session_state.conversation_chain = None
+                if st.session_state.agent:
                     st.success("Parámetros aplicados correctamente!")
                 else:
                     st.error("Error al aplicar parámetros.")
@@ -599,18 +669,19 @@ st.markdown("---")
 if st.session_state.vector_store is None:
     st.warning("⚠️ Por favor, sube y procesa al menos un documento PDF en la barra lateral para comenzar.")
 else:
-    # Inicializar cadena de conversación si no existe
-    if st.session_state.conversation_chain is None:
-        with st.spinner("Inicializando chatbot..."):
-            st.session_state.conversation_chain = initialize_conversation_chain(
+    # Inicializar agente si no existe
+    if st.session_state.agent is None:
+        with st.spinner("Inicializando agente inteligente..."):
+            st.session_state.agent = initialize_agent(
                 vector_store=st.session_state.vector_store,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 session_id=st.session_state.session_id,
-                chat_history=st.session_state.messages
+                chat_history=st.session_state.messages,
+                document_registry=st.session_state.document_registry
             )
     
-    if st.session_state.conversation_chain:
+    if st.session_state.agent:
         # Mostrar historial de mensajes
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
@@ -667,9 +738,20 @@ else:
                             st.session_state.last_learning_content = answer
                         
                         else:
+                            # Inicializar variables de fuentes
+                            source_documents = []
+                            sources = []
+                            
                             # Clasificar la query con el router
                             category = route_query(prompt)
-                            
+                            # #region agent log
+                            try:
+                                import json as _json
+                                with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
+                                    _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:route_query_result", "message": "category after router", "data": {"category": category, "prompt_prefix": (prompt or "")[:80]}, "hypothesisId": "path", "timestamp": __import__("time").time() * 1000}) + "\n")
+                            except Exception:
+                                pass
+                            # #endregion
                             if category == QueryCategory.CONVERSACION.value:
                                 # Respuesta directa sin RAG
                                 user_facts = user_memory.get_user_facts_formatted(st.session_state.session_id)
@@ -705,12 +787,58 @@ else:
                                     st.session_state.last_learning_content = answer
                             
                             else:
-                                # PREGUNTA_DOCUMENTO u OTRO: usar RAG normal
-                                result = st.session_state.conversation_chain.invoke({
-                                    "question": prompt
-                                })
-                                answer = result.get("answer", "No se pudo generar una respuesta.")
-                                source_documents = result.get("source_documents", [])
+                                # PREGUNTA_DOCUMENTO u OTRO: usar Agente con herramientas
+                                # #region agent log
+                                try:
+                                    import json as _json
+                                    with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
+                                        _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:agent_branch_enter", "message": "entering agent branch", "data": {}, "hypothesisId": "path", "timestamp": __import__("time").time() * 1000}) + "\n")
+                                except Exception:
+                                    pass
+                                # #endregion
+                                from langchain_core.messages import HumanMessage as HMsg
+                                agent_result = st.session_state.agent.invoke(
+                                    {"messages": [HMsg(content=prompt)]}
+                                )
+                                # Extraer la respuesta del último mensaje AI
+                                agent_messages = agent_result.get("messages", [])
+                                # #region agent log
+                                try:
+                                    import json as _json
+                                    _log_path = "/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log"
+                                    _msg_summary = [{"type": getattr(m, "type", None), "content_type": type(getattr(m, "content", None)).__name__, "content_repr": repr(getattr(m, "content", None))[:280]} for m in agent_messages]
+                                    with open(_log_path, "a") as _f:
+                                        _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:agent_messages", "message": "agent result messages", "data": {"n": len(agent_messages), "messages": _msg_summary}, "hypothesisId": "H2/H5", "timestamp": __import__("time").time() * 1000}) + "\n")
+                                except Exception:
+                                    pass
+                                # #endregion
+                                answer = "No se pudo generar una respuesta."
+                                for msg in reversed(agent_messages):
+                                    if hasattr(msg, 'content') and msg.type == "ai" and msg.content:
+                                        answer = _message_content_to_str(msg.content)
+                                        break
+                                # #region agent log
+                                try:
+                                    with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
+                                        _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:answer_after_extract", "message": "answer after extraction", "data": {"len": len(answer), "prefix": answer[:120] if answer else ""}, "hypothesisId": "H1", "timestamp": __import__("time").time() * 1000}) + "\n")
+                                except Exception:
+                                    pass
+                                # #endregion
+                                
+                                # Extraer source_documents de los ToolMessages
+                                source_documents = []
+                                for msg in agent_messages:
+                                    if msg.type == "tool" and msg.content:
+                                        # Los retriever tools devuelven documentos como texto
+                                        # Crear Document con metadata para mantener compatibilidad
+                                        from langchain_core.documents import Document as Doc
+                                        # Extraer el source del nombre de la herramienta
+                                        tool_name = getattr(msg, 'name', '')
+                                        source_name = tool_name.replace('search_document_', '').replace('_', ' ') if 'search_document_' in tool_name else 'Todos los documentos'
+                                        source_documents.append(Doc(
+                                            page_content=msg.content,
+                                            metadata={"source": source_name, "type": "text"}
+                                        ))
                         
                         # Mostrar respuesta
                         st.markdown(answer)
@@ -775,6 +903,14 @@ else:
                         st.toast('🧠 Analizando memoria...', icon='💾')
                     
                     except Exception as e:
+                        # #region agent log
+                        try:
+                            import json as _json
+                            with open("/home/tino/projectos/chatbot-test/.cursor/debug-c40eac.log", "a") as _f:
+                                _f.write(_json.dumps({"sessionId": "c40eac", "location": "app.py:except", "message": "exception in agent flow", "data": {"type": type(e).__name__, "msg": str(e)[:200]}, "hypothesisId": "H4", "timestamp": __import__("time").time() * 1000}) + "\n")
+                        except Exception:
+                            pass
+                        # #endregion
                         error_msg = f"Error al generar respuesta: {str(e)}"
                         st.error(error_msg)
                         st.session_state.messages.append({
@@ -787,7 +923,7 @@ else:
                             error_msg
                         )
     else:
-        st.error("Error al inicializar la cadena de conversación. Verifica la configuración.")
+        st.error("Error al inicializar el agente. Verifica la configuración.")
 
 # Footer
 st.markdown("---")

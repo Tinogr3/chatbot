@@ -12,6 +12,9 @@ load_dotenv()
 # Nombre por defecto del bucket de documentos
 BUCKET_NAME = "chatbot-rag-documents"
 
+# Límite de tokens seleccionado por el usuario en la UI (app lo actualiza desde el slider)
+USER_MAX_OUTPUT_TOKENS = 65535
+
 
 def get_credentials_and_project():
     """Obtiene las credenciales de servicio y el project_id."""
