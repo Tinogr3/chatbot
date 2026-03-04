@@ -109,7 +109,7 @@ def chat(
         answer = learning_manager.end_learning_session()
         learning_mode = False
         learning_topic = None
-    # Evaluar respuesta en modo aprendizaje
+    # Evaluar respuesta en modo aprendizaje (tema ya establecido)
     elif learning_mode and learning_topic:
         vs = initialize_vector_store(documents=None, existing_vector_store=None, session_id=session_id)
         if not vs:
@@ -120,6 +120,19 @@ def chat(
             answer = result.get("content", "No se pudo evaluar.")
             sources = list(set(_doc_to_source(d) for d in result.get("source_documents", [])))
             last_learning_content = answer
+    # Modo aprendizaje activado pero sin tema: el mensaje actual es el tema (iniciar sesión)
+    elif learning_mode and not (learning_topic or "").strip():
+        vector_store = initialize_vector_store(documents=None, existing_vector_store=None, session_id=session_id)
+        if not vector_store:
+            answer = "No hay documentos cargados para esta sesión."
+        else:
+            learning_manager = LearningFlowManager(vector_store, session_id, max_tokens=max_tokens)
+            result = learning_manager.start_learning_session(prompt)
+            answer = result.get("content", "No se pudo iniciar la sesión.")
+            sources = list(set(_doc_to_source(d) for d in result.get("source_documents", [])))
+            if result.get("is_learning_mode"):
+                learning_topic = result.get("topic", prompt)
+                last_learning_content = answer
     else:
         # Clasificar y ejecutar flujo normal
         category = route_query(prompt, max_tokens=max_tokens)

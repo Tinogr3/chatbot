@@ -369,8 +369,17 @@ for message in st.session_state.messages:
                 for s in message["sources"]:
                     st.write(f"• {s}")
 
-if st.session_state.learning_mode:
-    st.info("🎓 **Modo Aprendizaje activo** - Responde las preguntas para continuar. Escribe 'salir' para terminar.")
+with st.container():
+    learning_toggle = st.toggle(
+        "🎓 Activar Modo Aprendizaje",
+        value=st.session_state.learning_mode,
+        help="Activa el modo guiado: elige un tema y responde preguntas para practicar.",
+    )
+    if learning_toggle != st.session_state.learning_mode:
+        st.session_state.learning_mode = learning_toggle
+        if not learning_toggle:
+            st.session_state.learning_topic = None
+            st.session_state.last_learning_content = None
 
 if prompt := st.chat_input("Escribe tu pregunta aquí..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
