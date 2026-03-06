@@ -130,7 +130,7 @@ def get_summary_response(
         return {"answer": "No puedo generar el resumen en este momento.", "source_documents": []}
     retriever = vector_store.as_retriever(
         search_type="mmr",
-        search_kwargs={"k": 10, "fetch_k": 30, "lambda_mult": 0.7}
+        search_kwargs={"k": 150, "fetch_k": 450, "lambda_mult": 0.7}
     )
     try:
         docs = retriever.invoke(query)
@@ -138,19 +138,22 @@ def get_summary_response(
             return {"answer": "No hay documentos disponibles para resumir.", "source_documents": []}
         context_parts = [f"[{d.metadata.get('source', 'Desconocido')}]\n{d.page_content}" for d in docs]
         context = "\n\n---\n\n".join(context_parts)
-        summary_prompt = f"""Genera un resumen completo y estructurado del siguiente contenido.
+        summary_prompt = f"""Estás recibiendo FRAGMENTOS DESORDENADOS de uno o más documentos más grandes (bloques recuperados por similitud). El orden en que aparecen NO refleja el orden original del documento.
 
-CONTENIDO:
+TU LABOR: Sintetizar TODO el contenido recibido en un único resumen coherente. No dejes fuera ideas de ningún bloque: cada fragmento aporta información que debe quedar reflejada en el resumen. Si un tema aparece en varios fragmentos, intégralo en una sola sección; si hay datos, cifras o conceptos en cualquier bloque, inclúyelos.
+
+CONTENIDO (fragmentos desordenados):
 {context}
 
 INSTRUCCIONES:
-1. Organiza el resumen por temas principales
-2. Usa viñetas y sublistas para mayor claridad
-3. Menciona las fuentes de donde proviene cada sección
-4. Incluye los conceptos más importantes
-5. El resumen debe ser comprensivo pero conciso
+1. Considera todos los bloques por igual; no priorices solo los primeros.
+2. Organiza el resumen por temas principales, integrando la información de todos los fragmentos.
+3. Usa viñetas y sublistas para mayor claridad.
+4. Menciona las fuentes cuando sea relevante.
+5. Incluye los conceptos, datos e ideas importantes de TODOS los fragmentos recibidos.
+6. El resumen debe ser comprensivo y completo, sin omitir contenido por estar en bloques alejados en la lista.
 
-RESUMEN ESTRUCTURADO:"""
+RESUMEN ESTRUCTURADO (sintetizando todo el contenido recibido):"""
         response = llm.invoke(summary_prompt)
         return {"answer": extract_text(response.content).strip(), "source_documents": docs}
     except Exception as e:

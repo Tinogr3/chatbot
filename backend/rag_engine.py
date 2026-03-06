@@ -170,7 +170,7 @@ class DocumentCardSchema(BaseModel):
 
 
 def generate_document_card(text_content: str, filename: str) -> Dict[str, Any]:
-    truncated_text = text_content[:15000] if len(text_content) > 15000 else text_content
+    truncated_text = text_content[:65000] if len(text_content) > 65000 else text_content
     prompt = f"""Analiza el siguiente texto extraído del documento "{filename}" y genera la ficha (document card) con:
 - Un resumen ejecutivo del documento en exactamente 2 líneas.
 - Cinco palabras clave (topics).
@@ -223,7 +223,15 @@ def procesar_pdf(
             if doc.page_content:
                 doc.page_content = limpiar_texto(doc.page_content)
 
-        sample_pages = documents[:10]
+        n_pages = len(documents)
+        if n_pages <= 100:
+            sample_pages = documents
+        else:
+            first_50 = documents[:50]
+            mid_start = (n_pages // 2) - 12
+            middle_25 = documents[mid_start : mid_start + 25]
+            last_25 = documents[-25:]
+            sample_pages = first_50 + middle_25 + last_25
         sample_text = "\n\n".join(doc.page_content for doc in sample_pages if doc.page_content)
         document_card = generate_document_card(sample_text, nombre_archivo)
 
