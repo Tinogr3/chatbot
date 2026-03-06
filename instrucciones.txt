@@ -39,3 +39,7 @@ Abrir en el navegador la URL que muestre Streamlit (por defecto http://localhost
 - BACKEND_URL: si el backend está en otra máquina/puerto, en la terminal del frontend:
   export BACKEND_URL=http://localhost:8000
 - Variables de entorno para el backend: .env en la raíz o GOOGLE_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, BUCKET_NAME (ver backend/config.py).
+
+## Ngrok
+
+En otra terminal: ngrok http 8501 (o el puerto que tengas para front)

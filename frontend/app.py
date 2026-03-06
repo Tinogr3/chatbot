@@ -5,6 +5,7 @@ Solo UI y st.session_state; toda la lógica pesada está en el backend vía API.
 import os
 import logging
 import time
+import unicodedata
 
 import streamlit as st
 
@@ -80,7 +81,11 @@ def show_welcome_screen():
             submit = st.form_submit_button("🚀 Comenzar", use_container_width=True)
             if submit:
                 if username and username.strip():
-                    clean_username = username.strip().lower().replace(" ", "_")
+                    # Sanitizar a ASCII estricto para evitar UnicodeEncodeError en X-Session-Id (httpx)
+                    normalized = unicodedata.normalize("NFKD", username)
+                    ascii_bytes = normalized.encode("ascii", "ignore")
+                    ascii_str = ascii_bytes.decode("utf-8")
+                    clean_username = ascii_str.strip().lower().replace(" ", "_")
                     st.session_state.session_id = clean_username
                     st.session_state.authenticated = True
                     try:
