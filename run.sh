@@ -73,10 +73,10 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
-# Frontend Next.js (web/): instalar deps si hace falta y arrancar
-if [[ ! -d "web/node_modules" ]]; then
+# Frontend Next.js (frontend/): instalar deps si hace falta y arrancar
+if [[ ! -d "frontend/node_modules" ]]; then
   echo "Instalando dependencias del frontend (npm install)..."
-  (cd web && npm install)
+  (cd frontend && npm install)
 fi
 
 if command -v lsof >/dev/null 2>&1; then
@@ -89,7 +89,7 @@ if command -v lsof >/dev/null 2>&1; then
 fi
 
 echo "Iniciando frontend en http://localhost:${FRONTEND_PORT} ..."
-cd web
+cd frontend
 PORT="$FRONTEND_PORT" npm run dev &
 FRONTEND_PID=$!
 cd "$PROJECT_ROOT"

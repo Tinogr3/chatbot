@@ -1,9 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
-
-const CHAT_API_URL = process.env.NEXT_PUBLIC_CHAT_API_URL ?? "http://localhost:8000/chat";
-const DEFAULT_SESSION_ID = "alex_rivera";
+import { useCallback, useEffect, useState } from "react";
+import { chat as apiChat, getHistory } from "@/lib/api";
 
 export type ChatMessage = {
   id: string;
@@ -17,11 +15,43 @@ type UseChatOptions = {
   onError?: (error: Error) => void;
 };
 
+const DEFAULT_SESSION_ID = "usuario_test";
+
+function mapHistoryToMessages(messages: { role: string; content: string; sources?: string[] | null }[]): ChatMessage[] {
+  return messages.map((m, i) => ({
+    id: `${m.role}-history-${i}-${Date.now()}`,
+    role: m.role === "assistant" ? "assistant" : "user",
+    content: m.content,
+    sources: m.sources && m.sources.length > 0 ? m.sources : undefined,
+  }));
+}
+
 export function useChat(options: UseChatOptions = {}) {
-  const { sessionId = DEFAULT_SESSION_ID, onError } = options;
+  const sessionId = options.sessionId ?? DEFAULT_SESSION_ID;
+  const onError = options.onError;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setHistoryLoaded(false);
+    getHistory(sessionId)
+      .then((res) => {
+        if (cancelled) return;
+        setMessages(mapHistoryToMessages(res.messages));
+      })
+      .catch(() => {
+        if (!cancelled) setMessages([]);
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -38,34 +68,12 @@ export function useChat(options: UseChatOptions = {}) {
       setError(null);
 
       try {
-        const res = await fetch(CHAT_API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: trimmed,
-            session_id: sessionId,
-          }),
-        });
-
-        if (!res.ok) {
-          const errBody = await res.json().catch(() => ({}));
-          throw new Error(
-            (errBody.detail as string) || `Error ${res.status}: ${res.statusText}`
-          );
-        }
-
-        const data = (await res.json()) as {
-          answer: string;
-          sources?: string[];
-          learning_mode?: boolean;
-          learning_topic?: string | null;
-        };
-
+        const data = await apiChat(trimmed, sessionId);
         const assistantMessage: ChatMessage = {
           id: `assistant-${Date.now()}`,
           role: "assistant",
           content: data.answer,
-          sources: data.sources,
+          sources: data.sources?.length ? data.sources : undefined,
         };
         setMessages((prev) => [...prev, assistantMessage]);
       } catch (err) {
@@ -84,5 +92,5 @@ export function useChat(options: UseChatOptions = {}) {
     setError(null);
   }, []);
 
-  return { messages, isLoading, error, sendMessage, clearMessages };
+  return { messages, isLoading, error, sendMessage, clearMessages, historyLoaded };
 }
