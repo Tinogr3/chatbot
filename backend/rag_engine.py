@@ -3,7 +3,6 @@ Motor RAG (backend) - Sin dependencias de Streamlit.
 """
 import os
 import re
-import time
 import base64
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -28,6 +27,23 @@ from user_memory import UserMemoryManager
 logger = get_logger("rag_engine")
 
 _embeddings_cache: Optional[GoogleGenerativeAIEmbeddings] = None
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
 
 
 def extract_text(content: Any) -> str:
@@ -224,6 +240,7 @@ def procesar_pdf(
                 doc.page_content = limpiar_texto(doc.page_content)
 
         n_pages = len(documents)
+        enable_document_card = _env_flag("RAG_ENABLE_DOCUMENT_CARD", True)
         if n_pages <= 100:
             sample_pages = documents
         else:
@@ -233,7 +250,9 @@ def procesar_pdf(
             last_25 = documents[-25:]
             sample_pages = first_50 + middle_25 + last_25
         sample_text = "\n\n".join(doc.page_content for doc in sample_pages if doc.page_content)
-        document_card = generate_document_card(sample_text, nombre_archivo)
+        document_card: Dict[str, Any] = {}
+        if enable_document_card and sample_text:
+            document_card = generate_document_card(sample_text, nombre_archivo)
 
         if document_card:
             document_registry[nombre_archivo] = document_card
@@ -271,9 +290,15 @@ def procesar_pdf(
                     }
                 ))
 
-        if extract_images:
+        max_pages_for_images = _env_int("RAG_MAX_PAGES_FOR_IMAGES", 60)
+        max_images_per_pdf = _env_int("RAG_MAX_IMAGES_PER_PDF", 12)
+        enable_images = _env_flag("RAG_ENABLE_IMAGE_EXTRACTION", True)
+        should_extract_images = extract_images and enable_images and n_pages <= max_pages_for_images
+
+        if should_extract_images:
             images = extract_images_from_pdf(ruta_archivo)
             if images:
+                images = images[:max_images_per_pdf]
                 def process_one(item: Tuple[int, bytes, int, str]) -> Tuple[int, Optional[Tuple[str, int, str]]]:
                     i, image_bytes, page_num, image_id = item
                     desc = describe_image_with_gemini(
@@ -353,7 +378,7 @@ def initialize_vector_store(
             return existing_vector_store
 
         total_docs = len(documents)
-        batch_size = 5
+        batch_size = _env_int("RAG_VECTOR_BATCH_SIZE", 25)
         if existing_vector_store is None:
             if os.path.exists(persist_directory) and os.listdir(persist_directory):
                 vector_store = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
@@ -367,8 +392,6 @@ def initialize_vector_store(
                 for i in range(batch_size, total_docs, batch_size):
                     batch = documents[i : i + batch_size]
                     vector_store.add_documents(batch)
-                    if i + batch_size < total_docs:
-                        time.sleep(0.5)
                 return vector_store
         else:
             vector_store = existing_vector_store
@@ -376,8 +399,6 @@ def initialize_vector_store(
         for i in range(0, total_docs, batch_size):
             batch = documents[i : i + batch_size]
             vector_store.add_documents(batch)
-            if i + batch_size < total_docs:
-                time.sleep(0.5)
         return vector_store
     except Exception as e:
         logger.exception("Error initializing vector store: %s", e)

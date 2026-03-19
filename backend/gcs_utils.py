@@ -3,7 +3,7 @@ Utilidades para Google Cloud Storage (backend) - Sin Streamlit.
 """
 import os
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import IO, Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 from google.cloud import storage
@@ -92,8 +92,11 @@ def procesar_todos_pdfs_nube(
         document_registry = document_registry or {}
         client = get_gcs_client()
         bucket = client.bucket(bucket_name)
-        blobs = list(bucket.list_blobs())
-        pdf_files = [b.name for b in blobs if b.name.lower().endswith(".pdf")]
+        pdf_files: List[str] = []
+        for blob in bucket.list_blobs():
+            name = getattr(blob, "name", "")
+            if name.lower().endswith(".pdf"):
+                pdf_files.append(name)
         if not pdf_files:
             return [], [], document_registry, (
                 f"No hay archivos PDF en el bucket '{bucket_name}'. Sube al menos un PDF al bucket."
@@ -168,3 +171,72 @@ def upload_to_gcs(
     except Exception as e:
         logger.warning("Error uploading to GCS: %s", e)
         return None
+
+
+def upload_fileobj_to_gcs(
+    file_obj: IO[bytes],
+    filename: str,
+    bucket_name: str = BUCKET_NAME,
+) -> Optional[str]:
+    """
+    Sube un archivo a GCS desde un stream file-like para evitar cargar
+    todo el contenido en memoria.
+    """
+    try:
+        client = get_gcs_client()
+    except HTTPException:
+        return None
+    try:
+        bucket = client.bucket(bucket_name)
+        try:
+            bucket.create()
+        except Exception:
+            pass
+        blob = bucket.blob(filename)
+        file_obj.seek(0)
+        blob.upload_from_file(file_obj, content_type="application/pdf", rewind=True)
+        return f"gs://{bucket_name}/{filename}"
+    except Exception as e:
+        logger.warning("Error uploading stream to GCS: %s", e)
+        return None
+
+
+class GCSDownloadError(Exception):
+    """Error específico cuando falla la descarga de un objeto desde GCS."""
+
+
+def download_from_gcs(gcs_path: str, local_path: str) -> bool:
+    """
+    Descarga un objeto en GCS a `local_path`.
+
+    `gcs_path` debe tener formato: `gs://{bucket_name}/{blob_name}`.
+
+    Returns:
+        True si la descarga fue exitosa, False si falla.
+    """
+    try:
+        if not isinstance(gcs_path, str) or not gcs_path.strip():
+            logger.warning("download_from_gcs: gcs_path inválido (vacío)")
+            return False
+        if not gcs_path.startswith("gs://"):
+            logger.warning("download_from_gcs: gcs_path inválido (debe iniciar con 'gs://'): %s", gcs_path)
+            return False
+        if not isinstance(local_path, str) or not local_path.strip():
+            logger.warning("download_from_gcs: local_path inválido (vacío)")
+            return False
+
+        gcs_no_scheme = gcs_path[len("gs://"):]
+        bucket_name, _, blob_name = gcs_no_scheme.partition("/")
+        if not bucket_name or not blob_name:
+            logger.warning("download_from_gcs: gcs_path inválido (falta bucket o blob): %s", gcs_path)
+            return False
+
+        logger.info("Descargando desde GCS: %s -> %s", gcs_path, local_path)
+        client = get_gcs_client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        blob.download_to_filename(local_path)
+        return True
+    except Exception as e:
+        logger.warning("Error descargando desde GCS (%s): %s", gcs_path, str(e))
+        return False

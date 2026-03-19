@@ -1,12 +1,12 @@
 """
 Endpoints de subida de PDFs - POST /upload (asíncrono), POST /upload/load_cloud
 """
+import asyncio
 import base64
 from typing import Optional
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 
-from gcs_utils import upload_to_gcs
 from logger import get_logger
 from schemas import TaskEnqueuedResponse
 
@@ -26,21 +26,22 @@ async def upload_pdf(
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
 
-    content = await file.read()
     filename = file.filename
 
-    gcs_path = upload_to_gcs(content, filename)
-    if gcs_path:
-        logger.info("Archivo subido a GCS: %s", gcs_path)
+    # Flujo manual: NO enviar al bucket. Serializamos a base64 para que el worker
+    # procese el archivo directamente en background.
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="El PDF está vacío")
+    file_b64 = await asyncio.to_thread(base64.b64encode, file_bytes)
+    file_b64_str = file_b64.decode("utf-8")
 
     from worker import process_pdf_task
 
-    file_content_b64 = base64.b64encode(content).decode("utf-8")
     task = process_pdf_task.delay(
-        file_content_b64=file_content_b64,
         filename=filename,
         session_id=session_id,
-        gcs_path=gcs_path,
+        file_b64=file_b64_str,
     )
     return TaskEnqueuedResponse(task_id=task.id, message="PDF encolado. Consulta GET /status/{task_id} para el progreso.")
 

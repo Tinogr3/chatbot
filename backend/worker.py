@@ -2,10 +2,10 @@
 Worker Celery - Procesamiento asíncrono de videos (YouTube/Whisper) y PDFs.
 Broker y backend: Redis. Ejecutar: celery -A worker worker --loglevel=info
 """
-import base64
 import os
 import sys
 import tempfile
+import base64
 from typing import Any, Dict, List, Optional
 
 # Asegurar path del backend
@@ -88,31 +88,42 @@ def process_video_task(
 @app.task(bind=True, name="worker.process_pdf_task")
 def process_pdf_task(
     self,
-    file_content_b64: str,
     filename: str,
     session_id: str,
     gcs_path: Optional[str] = None,
+    file_b64: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Tarea asíncrona: procesa PDF (particionado, imágenes) y añade documentos al vector store.
-    file_content_b64: contenido del PDF en base64.
     """
     try:
         self.update_state(state="PROGRESS", meta={"progress": 0.05, "message": "Preparando documento..."})
         from api.chat import invalidate_agent_cache
         from document_registry import load_document_registry, save_document_registry
         from exceptions import DocumentProcessingError
-        from gcs_utils import upload_to_gcs
+        from gcs_utils import GCSDownloadError, download_from_gcs
         from rag_engine import initialize_vector_store, procesar_pdf as do_procesar_pdf
     except Exception as e:
         return {"success": False, "error": str(e), "filename": filename, "document_count": 0}
 
     tmp_path = None
     try:
-        content = base64.b64decode(file_content_b64)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(content)
             tmp_path = tmp.name
+        if file_b64:
+            try:
+                pdf_bytes = base64.b64decode(file_b64)
+            except Exception as e:
+                raise RuntimeError(f"Archivo PDF inválido en payload: {str(e)}") from e
+            with open(tmp_path, "wb") as f:
+                f.write(pdf_bytes)
+        elif gcs_path:
+            # Compatibilidad: si llega gcs_path, usamos flujo bucket.
+            ok = download_from_gcs(gcs_path, tmp_path)
+            if not ok:
+                raise GCSDownloadError(f"No se pudo descargar el PDF desde GCS: {gcs_path}")
+        else:
+            raise RuntimeError("No se recibió archivo para procesar (file_b64 o gcs_path).")
 
         self.update_state(state="PROGRESS", meta={"progress": 0.2, "message": "Procesando PDF y extrayendo texto..."})
         registry = load_document_registry(session_id)
@@ -152,6 +163,8 @@ def process_pdf_task(
             "document_count": len(documents),
             "message": f"Archivo '{filename}' procesado correctamente.",
         }
+    except GCSDownloadError as e:
+        return {"success": False, "error": str(e), "filename": filename, "document_count": 0}
     except DocumentProcessingError as e:
         return {"success": False, "error": e.message, "filename": filename, "document_count": 0}
     except Exception as e:

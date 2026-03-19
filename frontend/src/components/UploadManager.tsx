@@ -110,6 +110,7 @@ export default function UploadManager() {
   };
 
   const isTaskDone = taskStatus?.status === "SUCCESS" || taskStatus?.status === "FAILURE";
+  const isTaskRunning = !!taskId && !isTaskDone;
   const showTaskProgress = taskId && taskStatus && !isTaskDone;
   const showTaskResult = taskId && taskStatus && isTaskDone;
 
@@ -163,7 +164,7 @@ export default function UploadManager() {
             <button
               type="button"
               onClick={handleManualUpload}
-              disabled={!file || !!taskId}
+              disabled={!file || isTaskRunning}
               className="w-full py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Subir PDF
@@ -179,7 +180,7 @@ export default function UploadManager() {
             <button
               type="button"
               onClick={handleLoadCloud}
-              disabled={nubeLoading || !!taskId}
+              disabled={nubeLoading || isTaskRunning}
               className="w-full py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {nubeLoading ? (
@@ -209,7 +210,7 @@ export default function UploadManager() {
             <button
               type="button"
               onClick={handleProcessVideo}
-              disabled={!youtubeUrl.trim() || !!taskId}
+              disabled={!youtubeUrl.trim() || isTaskRunning}
               className="w-full py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Procesar video
