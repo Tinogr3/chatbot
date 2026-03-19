@@ -164,6 +164,64 @@ def process_pdf_task(
                 pass
 
 
+@app.task(bind=True, name="worker.process_cloud_pdfs_task")
+def process_cloud_pdfs_task(
+    self,
+    session_id: str,
+) -> Dict[str, Any]:
+    """
+    Tarea asíncrona: descarga y procesa todos los PDFs del bucket GCS para una sesión.
+    Replica la lógica del endpoint POST /upload/load_cloud, pero en background.
+    """
+    self.update_state(state="PROGRESS", meta={"progress": 0.0, "message": "Preparando procesamiento PDFs desde la nube..."})
+
+    # Imports locales para evitar ciclos y mantener carga inicial baja.
+    from api.chat import invalidate_agent_cache
+    from document_registry import save_document_registry
+    from gcs_utils import procesar_todos_pdfs_nube
+    from rag_engine import initialize_vector_store
+
+    def progress_callback(progress: float, message: str) -> None:
+        # Celery backend lee `PROGRESS` y usa `meta.progress`/`meta.message`.
+        # Mapeamos 0..1 a 0..0.75 para dejar espacio a las fases finales
+        # (persistencia de registry / vector store / invalidación de caché).
+        mapped_progress = max(0.0, min(0.75, progress * 0.75))
+        self.update_state(state="PROGRESS", meta={"progress": mapped_progress, "message": message})
+
+    documents, filenames, registry, error_message = procesar_todos_pdfs_nube(
+        session_id=session_id,
+        progress_callback=progress_callback,
+    )
+    if not documents:
+        raise RuntimeError(
+            error_message
+            or "No se encontraron PDFs en el bucket o hubo errores al procesarlos."
+        )
+
+    # En la lógica original el endpoint también guarda el registro y actualiza el vector store.
+    self.update_state(state="PROGRESS", meta={"progress": 0.8, "message": "Actualizando vector store..."})
+
+    save_document_registry(session_id, registry)
+    existing_vs = initialize_vector_store(documents=None, session_id=session_id)
+    vector_store = initialize_vector_store(
+        documents=documents,
+        existing_vector_store=existing_vs,
+        session_id=session_id,
+    )
+    if not vector_store:
+        raise RuntimeError("Error al crear/actualizar vector store")
+
+    invalidate_agent_cache(session_id)
+    self.update_state(state="PROGRESS", meta={"progress": 0.95, "message": "Finalizado."})
+
+    return {
+        "success": True,
+        "filenames": filenames,
+        "document_count": len(documents),
+        "message": f"{len(filenames)} archivos cargados desde la nube.",
+    }
+
+
 def get_task_result(task_id: str) -> Optional[AsyncResult]:
     """Devuelve el AsyncResult para un task_id (para consultar estado desde la API)."""
     if not task_id:

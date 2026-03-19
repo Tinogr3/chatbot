@@ -2,18 +2,13 @@
 Endpoints de subida de PDFs - POST /upload (asíncrono), POST /upload/load_cloud
 """
 import base64
-import os
-import tempfile
 from typing import Optional
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 
-from api.chat import invalidate_agent_cache
-from document_registry import load_document_registry, save_document_registry
-from gcs_utils import procesar_todos_pdfs_nube, upload_to_gcs
+from gcs_utils import upload_to_gcs
 from logger import get_logger
-from rag_engine import initialize_vector_store
-from schemas import LoadCloudResponse, TaskEnqueuedResponse
+from schemas import TaskEnqueuedResponse
 
 logger = get_logger("api.upload")
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -50,37 +45,24 @@ async def upload_pdf(
     return TaskEnqueuedResponse(task_id=task.id, message="PDF encolado. Consulta GET /status/{task_id} para el progreso.")
 
 
-@router.post("/load_cloud", response_model=LoadCloudResponse)
+@router.post("/load_cloud", response_model=TaskEnqueuedResponse)
 def load_cloud_pdfs(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
-) -> LoadCloudResponse:
+) -> TaskEnqueuedResponse:
     session_id = (x_session_id or "").strip().lower().replace(" ", "_")
     if not session_id:
         raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
 
-    documents, filenames, registry, error_message = procesar_todos_pdfs_nube(session_id=session_id)
-    if not documents:
-        return LoadCloudResponse(
-            success=False,
-            filenames=[],
-            document_count=0,
-            message=error_message or "No se encontraron PDFs en el bucket o hubo errores al procesarlos.",
-        )
+    # Validación estricta antes de encolar para que el cliente reciba
+    # un error claro (en lugar de fallos silenciosos en background).
+    from gcs_utils import validate_gcs_configuration
 
-    save_document_registry(session_id, registry)
-    existing_vs = initialize_vector_store(documents=None, session_id=session_id)
-    vector_store = initialize_vector_store(
-        documents=documents,
-        existing_vector_store=existing_vs,
-        session_id=session_id,
-    )
-    if not vector_store:
-        raise HTTPException(status_code=500, detail="Error al crear/actualizar vector store")
+    validate_gcs_configuration()
 
-    invalidate_agent_cache(session_id)
-    return LoadCloudResponse(
-        success=True,
-        filenames=filenames,
-        document_count=len(documents),
-        message=f"{len(filenames)} archivos cargados desde la nube.",
+    from worker import process_cloud_pdfs_task
+
+    task = process_cloud_pdfs_task.delay(session_id=session_id)
+    return TaskEnqueuedResponse(
+        task_id=task.id,
+        message="PDFs del bucket encolados. Consulta GET /status/{task_id} para el progreso.",
     )

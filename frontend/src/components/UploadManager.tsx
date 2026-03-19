@@ -24,7 +24,6 @@ export default function UploadManager() {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState<TaskStatusResponse | null>(null);
   const [nubeLoading, setNubeLoading] = useState(false);
-  const [nubeResult, setNubeResult] = useState<{ success: boolean; message: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -70,7 +69,6 @@ export default function UploadManager() {
       return;
     }
     setError(null);
-    setNubeResult(null);
     try {
       const { task_id } = await uploadPdf(file, sessionId);
       setTaskId(task_id);
@@ -84,11 +82,10 @@ export default function UploadManager() {
     setError(null);
     setTaskStatus(null);
     setTaskId(null);
-    setNubeResult(null);
     setNubeLoading(true);
     try {
-      const res = await loadCloudPdfs(sessionId);
-      setNubeResult({ success: res.success, message: res.message });
+      const { task_id } = await loadCloudPdfs(sessionId);
+      setTaskId(task_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -104,7 +101,6 @@ export default function UploadManager() {
       return;
     }
     setError(null);
-    setNubeResult(null);
     try {
       const { task_id } = await processVideo(url, sessionId);
       setTaskId(task_id);
@@ -135,7 +131,6 @@ export default function UploadManager() {
             onClick={() => {
               setActiveTab(tab.id);
               setError(null);
-              setNubeResult(null);
             }}
             className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
               activeTab === tab.id
@@ -184,7 +179,7 @@ export default function UploadManager() {
             <button
               type="button"
               onClick={handleLoadCloud}
-              disabled={nubeLoading}
+              disabled={nubeLoading || !!taskId}
               className="w-full py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {nubeLoading ? (
@@ -196,13 +191,6 @@ export default function UploadManager() {
                 "Cargar PDFs del bucket"
               )}
             </button>
-            {nubeResult && (
-              <p
-                className={`text-sm ${nubeResult.success ? "text-emerald-600" : "text-amber-600"}`}
-              >
-                {nubeResult.message}
-              </p>
-            )}
           </div>
         )}
 
