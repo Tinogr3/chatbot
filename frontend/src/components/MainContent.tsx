@@ -3,37 +3,15 @@
 import {
   Filter,
   Plus,
-  Video,
-  Mic,
-  MessageSquare,
-  FileQuestion,
   Camera,
   Mic2,
   HelpCircle,
   Send,
 } from "lucide-react";
 import { useRef } from "react";
-
-const HEATMAP_LEVELS = [
-  [4, 3, 2, 4, 5, 3, 4, 2, 3, 4],
-  [2, 4, 5, 3, 4, 5, 2, 4, 3, 5],
-  [3, 2, 4, 5, 3, 4, 5, 2, 4, 3],
-  [5, 4, 3, 2, 4, 3, 4, 5, 3, 4],
-  [4, 5, 4, 4, 2, 5, 3, 4, 5, 2],
-];
-
-const categories = [
-  { name: "Soberanía de Datos", percent: 82 },
-  { name: "Arquitectura Privacidad", percent: 45 },
-  { name: "Ética en IA", percent: 68 },
-];
-
-const contentCards = [
-  { title: "Video Píldoras", count: 3, icon: Video },
-  { title: "Podcasts", count: 5, icon: Mic },
-  { title: "Resúmenes", count: 12, icon: MessageSquare },
-  { title: "Exámenes", count: 8, icon: FileQuestion },
-];
+import { useUser } from "@/context/UserContext";
+import { contentCards } from "@/constants/dashboardConfig";
+import MaturityDashboard from "@/components/dashboard/MaturityDashboard";
 
 type MainContentProps = {
   onSendMessage?: (text: string) => void;
@@ -43,6 +21,7 @@ type MainContentProps = {
 export default function MainContent({ onSendMessage, chatInputRef }: MainContentProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const ref = chatInputRef ?? inputRef;
+  const { username, userInitials } = useUser();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,12 +48,12 @@ export default function MainContent({ onSendMessage, chatInputRef }: MainContent
           </a>
         </nav>
         <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-700">Alex Rivera</span>
+          <span className="text-sm text-gray-700">{username}</span>
           <button
             type="button"
             className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center text-sm font-medium"
           >
-            AR
+            {userInitials}
           </button>
         </div>
       </header>
@@ -106,54 +85,7 @@ export default function MainContent({ onSendMessage, chatInputRef }: MainContent
           </div>
         </div>
 
-        {/* Dashboard de Madurez */}
-        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <h2 className="text-lg font-semibold text-gray-800">
-              Dashboard de Madurez de Habilidades
-            </h2>
-            <button
-              type="button"
-              className="text-xs text-gray-500 hover:text-gray-700 shrink-0"
-            >
-              Actualizado hace 2h
-            </button>
-          </div>
-          <p className="text-sm text-gray-500 mb-4">
-            Progreso dinámico según tu actividad y evaluaciones.
-          </p>
-          <div className="space-y-4">
-            {categories.map((cat, catIndex) => (
-              <div key={cat.name} className="space-y-1.5">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-700">{cat.name}</span>
-                  <span className="font-medium text-gray-800">{cat.percent}%</span>
-                </div>
-                <div className="flex gap-0.5">
-                  {HEATMAP_LEVELS[catIndex % HEATMAP_LEVELS.length].map((level, i) => (
-                    <div
-                      key={i}
-                      className="w-6 h-6 rounded-sm flex-shrink-0"
-                      style={{
-                        backgroundColor:
-                          level === 5
-                            ? "#059669"
-                            : level === 4
-                              ? "#10b981"
-                              : level === 3
-                                ? "#34d399"
-                                : level === 2
-                                  ? "#6ee7b7"
-                                  : "#a7f3d0",
-                      }}
-                      title={`Nivel ${level}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+        <MaturityDashboard />
 
         {/* Tarjetas de contenido */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

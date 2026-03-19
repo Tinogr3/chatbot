@@ -1,30 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { Sparkles } from "lucide-react";
 import LeftSidebar from "@/components/LeftSidebar";
 import MainContent from "@/components/MainContent";
 import ChatPanel from "@/components/ChatPanel";
 import { useChat } from "@/hooks/useChat";
-import { Sparkles } from "lucide-react";
+import { UserProvider, useUser } from "@/context/UserContext";
 
-const SESSION_STORAGE_KEY = "cotutor_session_id";
+function WelcomeScreen() {
+  const { login } = useUser();
+  const [error, setError] = useState<string | null>(null);
 
-function normalizeSessionId(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-    .replace(/[^a-z0-9_-]/g, "");
-}
-
-function WelcomeScreen({ onSubmit }: { onSubmit: (sessionId: string) => void }) {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
     const input = form.querySelector<HTMLInputElement>('input[name="sessionId"]');
     const value = input?.value?.trim() ?? "";
-    const normalized = normalizeSessionId(value);
-    if (normalized.length > 0) onSubmit(normalized);
+
+    try {
+      login(value);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al iniciar sesión.");
+    }
   };
 
   return (
@@ -52,6 +51,14 @@ function WelcomeScreen({ onSubmit }: { onSubmit: (sessionId: string) => void }) 
               className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 text-gray-800 placeholder:text-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
             />
           </label>
+          {error && (
+            <div
+              role="alert"
+              className="rounded-lg border border-red-200 bg-red-50 text-red-800 px-3 py-2 text-xs"
+            >
+              {error}
+            </div>
+          )}
           <button
             type="submit"
             className="w-full py-3 rounded-xl bg-emerald-500 text-white font-semibold text-sm hover:bg-emerald-600 transition-colors"
@@ -68,26 +75,17 @@ function WelcomeScreen({ onSubmit }: { onSubmit: (sessionId: string) => void }) 
 }
 
 export default function DashboardPage() {
-  const [sessionId, setSessionIdState] = useState<string | null>(null);
-  const [hydrated, setHydrated] = useState(false);
+  return (
+    <UserProvider>
+      <DashboardGate />
+    </UserProvider>
+  );
+}
 
-  useEffect(() => {
-    const stored = typeof window !== "undefined" ? sessionStorage.getItem(SESSION_STORAGE_KEY) : null;
-    if (stored && stored.length > 0) {
-      setSessionIdState(stored);
-    }
-    setHydrated(true);
-  }, []);
+function DashboardGate() {
+  const { sessionId, isHydrated } = useUser();
 
-  const setSessionId = useCallback((id: string | null) => {
-    setSessionIdState(id);
-    if (typeof window !== "undefined") {
-      if (id) sessionStorage.setItem(SESSION_STORAGE_KEY, id);
-      else sessionStorage.removeItem(SESSION_STORAGE_KEY);
-    }
-  }, []);
-
-  if (!hydrated) {
+  if (!isHydrated) {
     return (
       <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
         <div className="text-gray-500 text-sm">Cargando...</div>
@@ -95,28 +93,29 @@ export default function DashboardPage() {
     );
   }
 
-  if (!sessionId) {
-    return <WelcomeScreen onSubmit={(id) => setSessionId(id)} />;
-  }
+  if (!sessionId) return <WelcomeScreen />;
 
-  return (
-    <DashboardLayoutWithLogout sessionId={sessionId} setSessionId={setSessionId} />
-  );
+  return <DashboardLayoutWithLogout />;
 }
 
-function DashboardLayoutWithLogout({
-  sessionId,
-  setSessionId,
-}: {
-  sessionId: string;
-  setSessionId: (id: string | null) => void;
-}) {
-  const { messages, isLoading, error, sendMessage } = useChat({ sessionId });
+function DashboardLayoutWithLogout() {
+  const { sessionId } = useUser();
+  const { messages, isLoading, error, sendMessage } = useChat({
+    sessionId: sessionId ?? undefined,
+  });
+
+  if (!sessionId) return null;
+
   return (
     <div className="flex h-screen w-full bg-gray-50 overflow-hidden">
-      <LeftSidebar sessionId={sessionId} onLogout={() => setSessionId(null)} />
+      <LeftSidebar />
       <MainContent onSendMessage={sendMessage} />
-      <ChatPanel messages={messages} isLoading={isLoading} error={error} />
+      <ChatPanel
+        messages={messages}
+        isLoading={isLoading}
+        error={error}
+        scaffoldMessage="La IA está guiando tu razonamiento hacia la Arquitectura de Privacidad."
+      />
     </div>
   );
 }

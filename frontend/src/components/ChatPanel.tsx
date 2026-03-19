@@ -1,33 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Settings, ChevronRight, ChevronDown } from "lucide-react";
 import type { ChatMessage } from "@/hooks/useChat";
 
-const INITIAL_MESSAGES: ChatMessage[] = [
-  {
-    id: "ai-1",
-    role: "assistant",
-    content:
-      "¿Cómo aplicarías el principio de minimización de datos en el nuevo flujo de onboarding?",
-  },
-  {
-    id: "user-1",
-    role: "user",
-    content: "Solo pediría el correo y nombre para crear la cuenta, y el resto cuando lo necesite el flujo.",
-  },
-  {
-    id: "ai-2",
-    role: "assistant",
-    content:
-      "Excelente enfoque. ¿Qué impacto crees que tendría esto en el tiempo de completado del formulario y en la tasa de abandono?",
-  },
-];
+import { useUser } from "@/context/UserContext";
+import PedagogicalScaffold from "@/components/PedagogicalScaffold";
 
 type ChatPanelProps = {
   messages: ChatMessage[];
   isLoading: boolean;
   error: Error | null;
+  scaffoldMessage?: string;
 };
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
@@ -76,8 +60,22 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   );
 }
 
-export default function ChatPanel({ messages, isLoading, error }: ChatPanelProps) {
-  const displayMessages = messages.length > 0 ? messages : INITIAL_MESSAGES;
+export default function ChatPanel({ messages, isLoading, error, scaffoldMessage }: ChatPanelProps) {
+  const { username, sessionId } = useUser();
+
+  const displayMessages = useMemo<ChatMessage[]>(() => {
+    if (messages.length > 0) return messages;
+
+    const safeName = username?.trim() ? username : "Usuario";
+
+    return [
+      {
+        id: `welcome-assistant-${sessionId ?? "anon"}`,
+        role: "assistant",
+        content: `Hola ${safeName}, soy COTUTOR IA. ¿En qué puedo ayudarte hoy?`,
+      },
+    ];
+  }, [messages, sessionId, username]);
 
   return (
     <aside className="w-[25%] min-w-[280px] h-screen flex flex-col bg-white border-l border-gray-200">
@@ -93,20 +91,7 @@ export default function ChatPanel({ messages, isLoading, error }: ChatPanelProps
         </button>
       </header>
 
-      <div className="shrink-0 mx-4 mt-3 p-3 rounded-lg bg-emerald-50 border border-emerald-100">
-        <p className="text-xs font-semibold text-emerald-800 uppercase tracking-wider mb-2">
-          Andamiaje Pedagógico
-        </p>
-        <div className="h-2 rounded-full bg-emerald-200 overflow-hidden mb-1.5">
-          <div
-            className="h-full rounded-full bg-emerald-500 transition-all duration-500"
-            style={{ width: "65%" }}
-          />
-        </div>
-        <p className="text-xs text-gray-600">
-          La IA está guiando tu razonamiento hacia la Arquitectura de Privacidad.
-        </p>
-      </div>
+      {scaffoldMessage ? <PedagogicalScaffold scaffoldMessage={scaffoldMessage} /> : null}
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
         {displayMessages.map((msg) => (

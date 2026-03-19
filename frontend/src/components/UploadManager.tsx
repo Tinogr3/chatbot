@@ -9,17 +9,15 @@ import {
   getTaskStatus,
   type TaskStatusResponse,
 } from "@/lib/api";
+import { useUser } from "@/context/UserContext";
 
 const POLL_INTERVAL_MS = 1500;
 
 type TabId = "manual" | "nube" | "youtube";
 
-type UploadManagerProps = {
-  sessionId: string;
-  onClose: () => void;
-};
+export default function UploadManager() {
+  const { sessionId } = useUser();
 
-export default function UploadManager({ sessionId, onClose }: UploadManagerProps) {
   const [activeTab, setActiveTab] = useState<TabId>("manual");
   const [file, setFile] = useState<File | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
@@ -66,6 +64,7 @@ export default function UploadManager({ sessionId, onClose }: UploadManagerProps
   }, [taskId]);
 
   const handleManualUpload = async () => {
+    if (!sessionId) return;
     if (!file) {
       setError("Selecciona un archivo PDF");
       return;
@@ -81,6 +80,7 @@ export default function UploadManager({ sessionId, onClose }: UploadManagerProps
   };
 
   const handleLoadCloud = async () => {
+    if (!sessionId) return;
     setError(null);
     setTaskStatus(null);
     setTaskId(null);
@@ -97,6 +97,7 @@ export default function UploadManager({ sessionId, onClose }: UploadManagerProps
   };
 
   const handleProcessVideo = async () => {
+    if (!sessionId) return;
     const url = youtubeUrl.trim();
     if (!url) {
       setError("Introduce la URL del video de YouTube");
@@ -121,6 +122,8 @@ export default function UploadManager({ sessionId, onClose }: UploadManagerProps
     { id: "nube", label: "Nube", icon: Cloud },
     { id: "youtube", label: "YouTube", icon: Youtube },
   ];
+
+  if (!sessionId) return null;
 
   return (
     <div className="space-y-4">
