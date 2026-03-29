@@ -8,7 +8,7 @@ from fastapi import APIRouter, Header, HTTPException
 from chat_manager import ChatHistoryManager
 from document_registry import load_document_registry
 from logger import get_logger
-from rag_engine import extract_text, initialize_agent, initialize_vector_store
+from rag_engine import extract_text, initialize_agent, initialize_vector_store_async
 from router import (
     QueryCategory,
     LearningFlowManager,
@@ -29,14 +29,14 @@ user_memory = UserMemoryManager()
 _agent_cache: dict = {}
 
 
-def _get_agent(session_id: str, temperature: float, max_tokens: int) -> Optional[Any]:
+async def _get_agent(session_id: str, temperature: float, max_tokens: int) -> Optional[Any]:
     if session_id in _agent_cache:
         return _agent_cache[session_id]
-    vector_store = initialize_vector_store(documents=None, existing_vector_store=None, session_id=session_id)
+    vector_store = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)
     if not vector_store:
         return None
     registry = load_document_registry(session_id)
-    history = chat_manager.get_history(session_id)
+    history = await chat_manager.get_history(session_id)
     agent = initialize_agent(
         vector_store=vector_store,
         temperature=temperature,
@@ -80,7 +80,7 @@ def _doc_to_source(doc: Any) -> str:
 
 
 @router.post("", response_model=ChatResponse)
-def chat(
+async def chat(
     body: ChatRequest,
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
 ) -> ChatResponse:
@@ -101,8 +101,9 @@ def chat(
 
     # Salir del modo aprendizaje
     if learning_mode and prompt.lower().strip() in ["salir", "exit", "terminar", "fin"]:
+        vs_exit = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)
         learning_manager = LearningFlowManager(
-            initialize_vector_store(documents=None, existing_vector_store=None, session_id=session_id),
+            vs_exit,
             session_id,
             max_tokens=max_tokens,
         )
@@ -111,7 +112,7 @@ def chat(
         learning_topic = None
     # Evaluar respuesta en modo aprendizaje (tema ya establecido)
     elif learning_mode and learning_topic:
-        vs = initialize_vector_store(documents=None, existing_vector_store=None, session_id=session_id)
+        vs = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)
         if not vs:
             answer = "No hay documentos cargados para esta sesión."
         else:
@@ -122,7 +123,7 @@ def chat(
             last_learning_content = answer
     # Modo aprendizaje activado pero sin tema: el mensaje actual es el tema (iniciar sesión)
     elif learning_mode and not (learning_topic or "").strip():
-        vector_store = initialize_vector_store(documents=None, existing_vector_store=None, session_id=session_id)
+        vector_store = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)
         if not vector_store:
             answer = "No hay documentos cargados para esta sesión."
         else:
@@ -136,7 +137,7 @@ def chat(
     else:
         # Clasificar y ejecutar flujo normal
         category = route_query(prompt, max_tokens=max_tokens)
-        vector_store = initialize_vector_store(documents=None, existing_vector_store=None, session_id=session_id)
+        vector_store = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)
 
         if category == QueryCategory.CONVERSACION.value:
             user_facts = user_memory.get_user_facts_formatted(session_id)
@@ -156,7 +157,7 @@ def chat(
                 last_learning_content = answer
         else:
             # PREGUNTA_DOCUMENTO / OTRO: agente
-            agent = _get_agent(session_id, temperature, max_tokens)
+            agent = await _get_agent(session_id, temperature, max_tokens)
             if not agent:
                 answer = "No hay documentos cargados. Sube o procesa al menos un PDF o video."
             else:
@@ -177,8 +178,8 @@ def chat(
                             sources.append(src)
 
     # Persistir mensajes
-    chat_manager.save_message(session_id, "user", prompt)
-    chat_manager.save_message(session_id, "assistant", answer, sources if sources else None)
+    await chat_manager.save_message(session_id, "user", prompt)
+    await chat_manager.save_message(session_id, "assistant", answer, sources if sources else None)
     user_memory.extract_and_save_async(session_id, prompt, answer, max_tokens=max_tokens)
 
     return ChatResponse(

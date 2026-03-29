@@ -6,40 +6,51 @@ Desde la raíz del proyecto:
 
   ./run.sh
 
-Arranca el backend en segundo plano y el frontend; al salir (Ctrl+C) se detienen ambos.
-Puertos por defecto: backend 8000, frontend 8501. Para cambiar: BACKEND_PORT=9000 STREAMLIT_SERVER_PORT=8502 ./run.sh
+Levanta Redis (si aplica), el backend FastAPI, el worker Celery y el frontend Next.js. Al salir (Ctrl+C) se detienen los servicios gestionados por el script.
+
+Puertos por defecto: backend 8000, frontend Next.js 3000. Ejemplo de override:
+
+  BACKEND_PORT=9000 FRONTEND_PORT=3001 ./run.sh
 
 ## Opción con dos terminales
 
-### 1. Activar entorno e instalar dependencias (una sola vez)
+### 1. Entorno Python e instalación (una sola vez)
 
+  python3 -m venv venv
   source venv/bin/activate
   pip install -r backend/requirements.txt
-  pip install -r frontend/requirements.txt
 
-### 2. Arrancar el backend (Terminal 1)
+### 2. Arrancar el backend (terminal 1)
 
 Desde la raíz del proyecto:
 
   source venv/bin/activate
+  export PYTHONPATH="$(pwd):${PYTHONPATH:-}"
   uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 
-Comprobar: http://localhost:8000/health → {"status":"ok"}
+Comprobar: http://localhost:8000/health → respuesta JSON con estado ok.
 
-### 3. Arrancar el frontend (Terminal 2)
+Nota: si usas subida de archivos o vídeo con cola asíncrona, necesitas Redis y un worker Celery (como hace run.sh). Para solo probar chat y endpoints síncronos puede bastar el backend solo.
 
-  source venv/bin/activate
+### 3. Arrancar el frontend (terminal 2)
+
   cd frontend
-  streamlit run app.py
+  npm install
+  npm run dev
 
-Abrir en el navegador la URL que muestre Streamlit (por defecto http://localhost:8501).
+Abrir en el navegador: http://localhost:3000 (puerto por defecto de `next dev`).
+
+Si el backend no está en http://localhost:8000, definir antes de `npm run dev`:
+
+  export NEXT_PUBLIC_BACKEND_URL=http://HOST:PUERTO
 
 ## Opcional
 
-- BACKEND_URL: si el backend está en otra máquina/puerto, en la terminal del frontend:
-  export BACKEND_URL=http://localhost:8000
-- Variables de entorno para el backend: .env en la raíz o GOOGLE_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, BUCKET_NAME (ver backend/config.py).
+- NEXT_PUBLIC_BACKEND_URL: URL pública del API vista por el navegador (Next.js inyecta las variables con prefijo NEXT_PUBLIC_ en el cliente).
+- Variables del backend: archivo .env en la raíz del repo o variables como GOOGLE_API_KEY, GOOGLE_APPLICATION_CREDENTIALS, BUCKET_NAME (ver backend/config.py).
 
 ## Ngrok
 
-En otra terminal: ngrok http 8501 (o el puerto que tengas para front)
+Para exponer el frontend: por ejemplo `ngrok http 3000` (o el puerto donde corre `npm run dev`).
+
+Para exponer solo el API: `ngrok http 8000`.

@@ -20,14 +20,14 @@ chat_manager = ChatHistoryManager()
 
 
 @router.post("/clear", response_model=ClearSessionResponse)
-def clear_session(
+async def clear_session(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
 ) -> ClearSessionResponse:
     session_id = (x_session_id or "").strip().lower().replace(" ", "_")
     if not session_id:
         raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
 
-    chat_manager.delete_history(session_id)
+    await chat_manager.delete_history(session_id)
     clear_document_registry(session_id)
     invalidate_agent_cache(session_id)
 

@@ -1,13 +1,30 @@
 """
 Motor RAG (backend) - Sin dependencias de Streamlit.
 """
+import asyncio
+import base64
+import functools
 import os
 import re
-import base64
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+try:
+    from pdfminer.pdfparser import PDFSyntaxError
+except ImportError:
+    PDFSyntaxError = None  # type: ignore[misc, assignment]
+
+try:
+    from google.auth.exceptions import GoogleAuthError
+except ImportError:
+    GoogleAuthError = None  # type: ignore[misc, assignment]
+
+try:
+    from google.api_core.exceptions import GoogleAPICallError
+except ImportError:
+    GoogleAPICallError = None  # type: ignore[misc, assignment]
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_chroma import Chroma
@@ -27,6 +44,41 @@ from user_memory import UserMemoryManager
 logger = get_logger("rag_engine")
 
 _embeddings_cache: Optional[GoogleGenerativeAIEmbeddings] = None
+
+# Pool opcional registrado por FastAPI (lifespan); si es None, run_in_executor usa el executor por defecto del loop.
+_rag_thread_pool: Optional[ThreadPoolExecutor] = None
+
+# Excepciones de carga/parseo PDF (PyPDF/pdfminer) para logging explícito sin except Exception genérico.
+_PDF_LOAD_ERRORS: Tuple[type, ...] = (OSError, FileNotFoundError, ValueError, MemoryError)
+if PDFSyntaxError is not None:
+    _PDF_LOAD_ERRORS = _PDF_LOAD_ERRORS + (PDFSyntaxError,)
+
+# Fallos típicos de embeddings (Vertex / API key / cliente Google).
+_EMBEDDINGS_INIT_ERRORS: Tuple[type, ...] = (OSError, ValueError, TypeError, RuntimeError)
+if GoogleAuthError is not None:
+    _EMBEDDINGS_INIT_ERRORS = _EMBEDDINGS_INIT_ERRORS + (GoogleAuthError,)
+
+# Chroma / persistencia / lotes de documentos.
+_VECTOR_STORE_ERRORS: Tuple[type, ...] = (OSError, RuntimeError, ValueError, TypeError)
+
+# Descripción de imagen vía Gemini (hilos paralelos en procesar_pdf).
+_IMAGE_TASK_ERRORS: Tuple[type, ...] = (OSError, RuntimeError, ValueError, TimeoutError)
+if GoogleAPICallError is not None:
+    _IMAGE_TASK_ERRORS = _IMAGE_TASK_ERRORS + (GoogleAPICallError,)
+
+
+def set_rag_thread_pool(executor: Optional[ThreadPoolExecutor]) -> None:
+    """Registra el ThreadPoolExecutor del lifespan de FastAPI para tareas RAG intensivas."""
+    global _rag_thread_pool
+    _rag_thread_pool = executor
+
+
+async def _run_in_rag_pool(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Ejecuta trabajo bloqueante en el pool RAG (o el executor por defecto del event loop)."""
+    loop = asyncio.get_running_loop()
+    if kwargs:
+        return await loop.run_in_executor(_rag_thread_pool, functools.partial(fn, *args, **kwargs))
+    return await loop.run_in_executor(_rag_thread_pool, fn, *args)
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -118,7 +170,13 @@ def extract_images_from_pdf(pdf_path: str) -> List[Tuple[bytes, int, str]]:
                     image_bytes = base_image["image"]
                     if len(image_bytes) > 5000:
                         images.append((image_bytes, page_num + 1, f"page{page_num + 1}_img{img_index + 1}"))
-                except Exception:
+                except (OSError, ValueError, KeyError, RuntimeError) as img_err:
+                    logger.debug(
+                        "Extracción imagen PDF omitida (página %s, img %s): %s",
+                        page_num + 1,
+                        img_index,
+                        img_err,
+                    )
                     continue
         doc.close()
     except ImportError:
@@ -137,10 +195,20 @@ def extract_images_from_pdf(pdf_path: str) -> List[Tuple[bytes, int, str]]:
                         image_bytes = f.read()
                     if len(image_bytes) > 5000:
                         images.append((image_bytes, 1, Path(img_path).stem))
-        except Exception as e:
-            logger.warning("Error extracting images: %s", e)
-    except Exception as e:
-        logger.warning("Error extracting images: %s", e)
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.warning(
+                "Extracción imágenes PDF (unstructured): %s: %s",
+                type(e).__name__,
+                e,
+                exc_info=True,
+            )
+    except (OSError, RuntimeError, ValueError) as e:
+        logger.warning(
+            "Extracción imágenes PDF (PyMuPDF): %s: %s",
+            type(e).__name__,
+            e,
+            exc_info=True,
+        )
     return images
 
 
@@ -163,8 +231,13 @@ def get_embeddings() -> Optional[GoogleGenerativeAIEmbeddings]:
             location="global",
         )
         return _embeddings_cache
-    except Exception as e:
-        logger.warning("Error initializing embeddings: %s", e)
+    except _EMBEDDINGS_INIT_ERRORS as e:
+        logger.warning(
+            "Embeddings Google (text-embedding-004): fallo de credenciales, proyecto o cliente — %s: %s",
+            type(e).__name__,
+            e,
+            exc_info=True,
+        )
         return None
 
 
@@ -316,8 +389,14 @@ def procesar_pdf(
                         try:
                             idx, res = future.result()
                             results_by_index[idx] = res
-                        except Exception as e:
-                            logger.warning("Error processing image: %s", e)
+                        except _IMAGE_TASK_ERRORS as e:
+                            logger.warning(
+                                "PDF imagen (Gemini paralelo): %s: %s — archivo=%s",
+                                type(e).__name__,
+                                e,
+                                nombre_archivo,
+                                exc_info=True,
+                            )
                 for result in results_by_index:
                     if result:
                         desc, page_num, image_id = result
@@ -336,9 +415,30 @@ def procesar_pdf(
                     doc.metadata[key] = str(value) if value is not None else ""
 
         return all_documents, document_registry
-    except Exception as e:
-        logger.exception("Error processing PDF: %s", e)
-        raise DocumentProcessingError(f"Error procesando PDF: {e}") from e
+    except DocumentProcessingError:
+        raise
+    except _PDF_LOAD_ERRORS as e:
+        logger.error(
+            "PDF carga o parseo (PyPDF/pdfminer): %s: %s — archivo=%s",
+            type(e).__name__,
+            e,
+            ruta_archivo,
+            exc_info=True,
+        )
+        raise DocumentProcessingError(
+            f"Error de lectura o formato PDF ({type(e).__name__}): {e}"
+        ) from e
+    except (RuntimeError, OSError, MemoryError, TypeError, KeyError) as e:
+        logger.error(
+            "PDF post-procesamiento (chunks, metadatos o imágenes): %s: %s — archivo=%s",
+            type(e).__name__,
+            e,
+            ruta_archivo,
+            exc_info=True,
+        )
+        raise DocumentProcessingError(
+            f"Error procesando contenido del PDF ({type(e).__name__}): {e}"
+        ) from e
 
 
 def create_document_tool(vector_store: Any, filename: str, usage_guide: str) -> Optional[Any]:
@@ -371,6 +471,10 @@ def initialize_vector_store(
     try:
         embeddings = get_embeddings()
         if not embeddings:
+            logger.warning(
+                "Chroma omitido: embeddings Google no inicializados (revisar credenciales/API). session_id=%s",
+                session_id,
+            )
             return None
         if documents is None or len(documents) == 0:
             if os.path.exists(persist_directory) and os.listdir(persist_directory):
@@ -400,9 +504,48 @@ def initialize_vector_store(
             batch = documents[i : i + batch_size]
             vector_store.add_documents(batch)
         return vector_store
-    except Exception as e:
-        logger.exception("Error initializing vector store: %s", e)
+    except _VECTOR_STORE_ERRORS as e:
+        logger.error(
+            "Chroma vector store (persist=%s, session_id=%s): %s: %s",
+            persist_directory,
+            session_id,
+            type(e).__name__,
+            e,
+            exc_info=True,
+        )
         return None
+
+
+async def initialize_vector_store_async(
+    documents: Optional[List[Document]] = None,
+    existing_vector_store: Optional[Any] = None,
+    session_id: Optional[str] = None,
+) -> Optional[Any]:
+    """Versión no bloqueante para rutas FastAPI: delega en el pool de hilos RAG."""
+    return await _run_in_rag_pool(
+        initialize_vector_store,
+        documents,
+        existing_vector_store,
+        session_id,
+    )
+
+
+async def procesar_pdf_async(
+    ruta_archivo: str,
+    extract_images: bool = True,
+    max_tokens: int = 65535,
+    session_id: Optional[str] = None,
+    document_registry: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Document], Dict[str, Any]]:
+    """Versión no bloqueante para FastAPI: mismo contrato que `procesar_pdf`."""
+    return await _run_in_rag_pool(
+        procesar_pdf,
+        ruta_archivo,
+        extract_images=extract_images,
+        max_tokens=max_tokens,
+        session_id=session_id,
+        document_registry=document_registry,
+    )
 
 
 def initialize_agent(
