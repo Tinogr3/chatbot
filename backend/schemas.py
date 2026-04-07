@@ -1,9 +1,11 @@
 """
 Modelos Pydantic estrictos para inputs/outputs de la API y del RAG.
 """
+from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ----- Chat -----
@@ -175,3 +177,311 @@ class LearningSessionOutput(BaseModel):
     is_correct: bool = Field(False, description="Si la respuesta evaluada es correcta")
     is_partial: bool = Field(False, description="Si la respuesta es parcialmente correcta")
     source_documents: List[Any] = Field(default_factory=list, description="Documentos fuente")
+
+
+# =====================================================================
+# Evaluación por competencias
+# =====================================================================
+
+
+class CompetencyTypeEnum(str, Enum):
+    """Tipo de competencia."""
+
+    GENERAL = "general"
+    ESPECIFICA = "especifica"
+
+
+# ----- Competency -----
+
+class CompetencyBase(BaseModel):
+    """Campos compartidos para crear/actualizar una competencia."""
+
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Nombre de la competencia",
+    )
+    type: CompetencyTypeEnum = Field(
+        ...,
+        description="Tipo de competencia: general o específica",
+    )
+    document_id: Optional[str] = Field(
+        None,
+        max_length=255,
+        description="ID del documento subido asociado a esta competencia",
+    )
+
+
+class CompetencyCreate(CompetencyBase):
+    """Schema de creación de competencia (sin id ni timestamps)."""
+
+
+class CompetencyRead(CompetencyBase):
+    """Schema de lectura de competencia (incluye id y timestamps)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(..., description="Identificador único de la competencia")
+    created_at: datetime = Field(..., description="Fecha de creación")
+    updated_at: datetime = Field(..., description="Fecha de última actualización")
+
+
+# ----- Subcompetency -----
+
+class SubcompetencyBase(BaseModel):
+    """Campos compartidos para crear/actualizar una subcompetencia."""
+
+    competency_id: int = Field(
+        ...,
+        gt=0,
+        description="ID de la competencia padre",
+    )
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Nombre de la subcompetencia",
+    )
+
+
+class SubcompetencyCreate(SubcompetencyBase):
+    """Schema de creación de subcompetencia."""
+
+
+class SubcompetencyRead(SubcompetencyBase):
+    """Schema de lectura de subcompetencia (incluye id y timestamp)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(..., description="Identificador único de la subcompetencia")
+    created_at: datetime = Field(..., description="Fecha de creación")
+
+
+# ----- LearningOutcome -----
+
+class LearningOutcomeBase(BaseModel):
+    """Campos compartidos para crear/actualizar un resultado de aprendizaje."""
+
+    subcompetency_id: int = Field(
+        ...,
+        gt=0,
+        description="ID de la subcompetencia asociada",
+    )
+    description: str = Field(
+        ...,
+        min_length=1,
+        description="Descripción del resultado de aprendizaje esperado",
+    )
+    weight: float = Field(
+        1.0,
+        ge=0.0,
+        le=1.0,
+        description="Peso ponderado del resultado (0.0–1.0)",
+    )
+
+
+class LearningOutcomeCreate(LearningOutcomeBase):
+    """Schema de creación de resultado de aprendizaje."""
+
+
+class LearningOutcomeRead(LearningOutcomeBase):
+    """Schema de lectura de resultado de aprendizaje (incluye id y timestamp)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(..., description="Identificador único del resultado de aprendizaje")
+    created_at: datetime = Field(..., description="Fecha de creación")
+
+
+# ----- LearningEvidence -----
+
+class LearningEvidenceBase(BaseModel):
+    """Campos compartidos para crear/actualizar una evidencia de evaluación."""
+
+    session_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="ID de sesión del usuario evaluado",
+    )
+    learning_outcome_id: int = Field(
+        ...,
+        gt=0,
+        description="ID del resultado de aprendizaje evaluado",
+    )
+    score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Puntuación obtenida (0.0–1.0)",
+    )
+    feedback: Optional[str] = Field(
+        None,
+        description="Retroalimentación textual de la evaluación",
+    )
+
+
+class LearningEvidenceCreate(LearningEvidenceBase):
+    """Schema de creación de evidencia de evaluación."""
+
+
+class LearningEvidenceRead(LearningEvidenceBase):
+    """Schema de lectura de evidencia de evaluación (incluye id y timestamp)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(..., description="Identificador único de la evidencia")
+    timestamp: datetime = Field(..., description="Momento en que se registró la evaluación")
+
+
+# ----- UserCompetencyProgress -----
+
+class UserCompetencyProgressBase(BaseModel):
+    """Campos compartidos para el progreso de un usuario en una subcompetencia."""
+
+    session_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="ID de sesión del usuario",
+    )
+    subcompetency_id: int = Field(
+        ...,
+        gt=0,
+        description="ID de la subcompetencia",
+    )
+    score: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="Puntuación acumulada en la subcompetencia (0.0–1.0)",
+    )
+
+
+class UserCompetencyProgressCreate(UserCompetencyProgressBase):
+    """Schema de creación/actualización de progreso."""
+
+
+class UserCompetencyProgressRead(UserCompetencyProgressBase):
+    """Schema de lectura de progreso (incluye timestamp)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    last_updated: datetime = Field(
+        ...,
+        description="Fecha de la última actualización del progreso",
+    )
+
+
+# ----- Request / Response de evaluación -----
+
+class EvaluateLearningRequest(BaseModel):
+    """Request para evaluar la respuesta de un estudiante a un resultado de aprendizaje."""
+
+    session_id: str = Field(
+        ...,
+        min_length=1,
+        description="ID de sesión del usuario que responde",
+    )
+    learning_outcome_id: int = Field(
+        ...,
+        gt=0,
+        description="ID del resultado de aprendizaje a evaluar",
+    )
+    answer: str = Field(
+        ...,
+        min_length=1,
+        description="Respuesta del estudiante a evaluar",
+    )
+
+
+class EvaluateLearningResponse(BaseModel):
+    """Response con el resultado de una evaluación de aprendizaje."""
+
+    score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Puntuación asignada a la respuesta (0.0–1.0)",
+    )
+    feedback: str = Field(
+        ...,
+        description="Retroalimentación descriptiva sobre la respuesta",
+    )
+    updated_subcompetency_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Puntuación actualizada de la subcompetencia tras la evaluación (0.0–1.0)",
+    )
+
+
+# ----- Extracción automática de competencias (salida LLM) -----
+
+
+class ExtractedLearningOutcome(BaseModel):
+    """Resultado de aprendizaje extraído por el LLM."""
+
+    description: str = Field(
+        ...,
+        min_length=1,
+        description="Descripción del resultado de aprendizaje",
+    )
+
+
+class ExtractedSubcompetency(BaseModel):
+    """Subcompetencia extraída por el LLM, con su learning outcome asociado."""
+
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Nombre de la subcompetencia",
+    )
+    learning_outcomes: List[ExtractedLearningOutcome] = Field(
+        ...,
+        min_length=1,
+        max_length=1,
+        description="Exactamente un resultado de aprendizaje para esta subcompetencia",
+    )
+
+
+class ExtractedCompetencyTree(BaseModel):
+    """Árbol completo de competencias extraído por el LLM desde un documento."""
+
+    competency_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Nombre de la competencia general del documento",
+    )
+    subcompetencies: List[ExtractedSubcompetency] = Field(
+        ...,
+        min_length=2,
+        max_length=2,
+        description="Exactamente 2 subcompetencias derivadas de la competencia general",
+    )
+
+
+# ----- Dashboard -----
+
+class DashboardCompetencyItem(BaseModel):
+    """Elemento individual del dashboard: competencia con su puntuación."""
+
+    name: str = Field(..., description="Nombre de la competencia")
+    score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Puntuación promedio de la competencia (0.0–1.0)",
+    )
+
+
+class DashboardCompetencyResponse(BaseModel):
+    """Response con la lista de competencias y sus puntuaciones para el dashboard."""
+
+    competencies: List[DashboardCompetencyItem] = Field(
+        default_factory=list,
+        description="Lista de competencias con sus puntuaciones agregadas",
+    )

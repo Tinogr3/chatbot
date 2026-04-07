@@ -2,6 +2,8 @@
 Worker Celery - Procesamiento asíncrono de videos (YouTube/Whisper) y PDFs.
 Broker y backend: Redis. Ejecutar: celery -A worker worker --loglevel=info
 """
+import asyncio
+import logging
 import os
 import sys
 import tempfile
@@ -34,6 +36,8 @@ app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+logger = logging.getLogger("worker")
 
 
 @app.task(bind=True, name="worker.process_video_task")
@@ -156,6 +160,33 @@ def process_pdf_task(
             return {"success": False, "error": "Error al crear/actualizar vector store", "filename": filename, "document_count": 0}
 
         invalidate_agent_cache(session_id)
+
+        try:
+            from rag_engine import extract_document_competencies, save_extracted_competencies
+
+            summary_text = "\n".join(
+                doc.page_content for doc in documents
+                if doc.metadata.get("type") == "text"
+            )[:60000]
+
+            if summary_text:
+                competency_tree = extract_document_competencies(summary_text)
+                if competency_tree:
+                    asyncio.run(save_extracted_competencies(competency_tree, filename))
+                    n_subs = len(competency_tree.subcompetencies)
+                    n_los = sum(len(s.learning_outcomes) for s in competency_tree.subcompetencies)
+                    logger.info(
+                        "Competencias extraídas para '%s': %d entidades "
+                        "(1 competencia, %d subcompetencias, %d learning outcomes)",
+                        filename, 1 + n_subs + n_los, n_subs, n_los,
+                    )
+                else:
+                    logger.warning("No se pudieron extraer competencias para '%s'", filename)
+            else:
+                logger.warning("Sin texto disponible para extraer competencias de '%s'", filename)
+        except Exception as e:
+            logger.warning("Error en extracción de competencias para '%s': %s", filename, e)
+
         return {
             "success": True,
             "gcs_path": gcs_path,

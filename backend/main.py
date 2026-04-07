@@ -37,6 +37,7 @@ from api.history import router as history_router
 from api.user_facts import router as user_facts_router
 from api.session import router as session_router
 from api.tasks import router as tasks_router
+from api.evaluation import router as evaluation_router
 
 # Misma configuración HTTP en rutas: `settings: HttpSettingsDep`
 HttpSettingsDep = Annotated[HttpSettings, Depends(get_http_settings)]
@@ -49,6 +50,9 @@ _http = get_http_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Pool dedicado para operaciones RAG pesadas (Chroma, PDF) sin bloquear el event loop."""
+    from database import init_db
+    await init_db()
+
     workers = max(1, int(os.getenv("RAG_THREAD_POOL_WORKERS", "4")))
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="rag_pool")
     set_rag_thread_pool(executor)
@@ -79,6 +83,7 @@ app.include_router(history_router)
 app.include_router(user_facts_router)
 app.include_router(session_router)
 app.include_router(tasks_router)
+app.include_router(evaluation_router)
 
 
 @app.get("/health")

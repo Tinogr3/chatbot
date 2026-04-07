@@ -11,6 +11,7 @@ redis>=5.0.0
 
 python-dotenv>=1.0.0
 pydantic>=2.0.0
+sqlalchemy>=2.0.0
 
 # LangChain
 langchain>=0.3.0

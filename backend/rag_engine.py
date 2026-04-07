@@ -112,10 +112,11 @@ def extract_text(content: Any) -> str:
 
 def get_gemini_vision_model(max_tokens: int = 65535) -> Optional[ChatGoogleGenerativeAI]:
     try:
+        vision_model = os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview"
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
             return ChatGoogleGenerativeAI(
-                model="gemini-3-pro-preview",
+                model=vision_model,
                 google_api_key=api_key,
                 temperature=1,
                 max_output_tokens=max_tokens
@@ -123,7 +124,7 @@ def get_gemini_vision_model(max_tokens: int = 65535) -> Optional[ChatGoogleGener
         credentials, project_id = get_credentials_and_project()
         if credentials and project_id:
             return ChatGoogleGenerativeAI(
-                model="gemini-3-pro-preview",
+                model=vision_model,
                 credentials=credentials,
                 project=project_id,
                 location="global",
@@ -291,6 +292,92 @@ Texto del documento:
     except Exception as e:
         logger.warning("Error generating document card for %s: %s", filename, e)
         return {}
+
+
+def extract_document_competencies(text: str) -> Optional["ExtractedCompetencyTree"]:
+    """Extrae un árbol de competencias (1 general, 2 subcompetencias, 2 learning outcomes)
+    a partir del texto de un documento usando salida estructurada del LLM."""
+    from schemas import ExtractedCompetencyTree
+
+    truncated = text[:60000] if len(text) > 60000 else text
+    prompt = (
+        "Eres un experto en diseño curricular por competencias. "
+        "A partir del siguiente texto extraído de un documento educativo, "
+        "identifica:\n"
+        "1. Una competencia general que el documento permite desarrollar.\n"
+        "2. Dos subcompetencias derivadas de esa competencia general.\n"
+        "3. Para cada subcompetencia, un resultado de aprendizaje (learning outcome) "
+        "concreto y evaluable que el estudiante debería demostrar.\n\n"
+        "Responde únicamente con la estructura solicitada.\n\n"
+        f"Texto del documento:\n---\n{truncated}\n---"
+    )
+    try:
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        if api_key:
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-3-flash-preview", google_api_key=api_key, temperature=0
+            )
+        else:
+            credentials, project_id = get_credentials_and_project()
+            if not credentials or not project_id:
+                logger.warning("extract_document_competencies: sin credenciales LLM disponibles")
+                return None
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-3-flash-preview",
+                credentials=credentials,
+                project=project_id,
+                location="global",
+                temperature=0,
+            )
+        structured_llm = llm.with_structured_output(ExtractedCompetencyTree)
+        result = structured_llm.invoke(prompt)
+        return result if result else None
+    except Exception as e:
+        logger.warning("Error extrayendo competencias del documento: %s", e)
+        return None
+
+
+async def save_extracted_competencies(
+    tree: "ExtractedCompetencyTree",
+    document_id: str,
+) -> None:
+    """Persiste un ExtractedCompetencyTree en la BD de competencias."""
+    from database import AsyncSessionLocal, init_db
+    from models import Competency, CompetencyType, LearningOutcome, Subcompetency
+
+    await init_db()
+
+    async with AsyncSessionLocal() as session:
+        competency = Competency(
+            name=tree.competency_name,
+            type=CompetencyType.GENERAL,
+            document_id=document_id,
+        )
+        session.add(competency)
+        await session.flush()
+
+        for sub_data in tree.subcompetencies:
+            sub = Subcompetency(
+                competency_id=competency.id,
+                name=sub_data.name,
+            )
+            session.add(sub)
+            await session.flush()
+
+            for lo_data in sub_data.learning_outcomes:
+                lo = LearningOutcome(
+                    subcompetency_id=sub.id,
+                    description=lo_data.description,
+                    weight=1.0,
+                )
+                session.add(lo)
+
+        await session.commit()
+    logger.info(
+        "Competencias guardadas en BD para documento '%s' (competency_id=%d)",
+        document_id,
+        competency.id,
+    )
 
 
 def procesar_pdf(
@@ -559,18 +646,18 @@ def initialize_agent(
     if vector_store is None:
         return None
     try:
-        credentials, project_id = get_credentials_and_project()
-        if not project_id:
-            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
-            if not api_key:
-                return None
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        if api_key:
             llm = ChatGoogleGenerativeAI(
                 model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
                 max_output_tokens=max_tokens,
-                api_key=api_key
+                api_key=api_key,
             )
         else:
+            credentials, project_id = get_credentials_and_project()
+            if not credentials or not project_id:
+                return None
             llm = ChatGoogleGenerativeAI(
                 model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
                 temperature=temperature,
