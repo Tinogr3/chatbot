@@ -47,7 +47,12 @@ export type GradeLevel = "A" | "B" | "C" | "D";
 export type LearningCriterion = {
   id: string;
   name: string;
-  description: string;
+  /**
+   * Opcional: el endpoint dinámico `/dashboard/competencies` no expone
+   * descripciones por competencia. Cuando viene `undefined` o vacío,
+   * `LearningCriteriaSection` simplemente no renderiza el subtexto.
+   */
+  description?: string;
   domainPercent: number;
   grade: GradeLevel;
   category: string;

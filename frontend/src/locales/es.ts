@@ -157,6 +157,10 @@ export const dictionaries = {
       description: "Progreso dinámico según tu actividad y evaluaciones.",
       criteriaSectionTitle: "Criterios de Aprendizaje y Calificaciones",
       heatmapLevelTitle: (level: number) => `Nivel ${level}`,
+      criteriaLoading: "Cargando competencias...",
+      criteriaEmpty:
+        "Sube documentos al proyecto para que se extraigan competencias y aparezcan aquí.",
+      criteriaError: "No se pudieron cargar las competencias.",
     },
     categories: {
       dataSovereignty: "Soberanía de Datos",

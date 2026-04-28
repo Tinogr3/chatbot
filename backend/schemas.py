@@ -28,6 +28,14 @@ class ChatResponse(BaseModel):
     sources: List[str] = Field(default_factory=list, description="Fuentes utilizadas")
     learning_mode: bool = Field(False, description="Si el modo aprendizaje sigue activo")
     learning_topic: Optional[str] = Field(None, description="Tema en modo aprendizaje")
+    progress_updated: bool = Field(
+        False,
+        description=(
+            "True si la respuesta evaluada produjo una nueva evidencia y el "
+            "progreso de la subcompetencia se actualizó en BD. El frontend "
+            "lo usa como señal para refrescar el dashboard de competencias."
+        ),
+    )
 
 
 # ----- Upload -----

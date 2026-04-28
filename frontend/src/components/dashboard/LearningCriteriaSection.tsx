@@ -47,9 +47,11 @@ export default function LearningCriteriaSection({
                 <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
                   {criterion.name}
                 </h4>
-                <p className="mt-0.5 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
-                  {criterion.description}
-                </p>
+                {criterion.description ? (
+                  <p className="mt-0.5 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
+                    {criterion.description}
+                  </p>
+                ) : null}
               </div>
             </div>
 

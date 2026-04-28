@@ -38,6 +38,7 @@ from api.user_facts import router as user_facts_router
 from api.session import router as session_router
 from api.tasks import router as tasks_router
 from api.evaluation import router as evaluation_router
+from api.dashboard import router as dashboard_router
 
 # Misma configuración HTTP en rutas: `settings: HttpSettingsDep`
 HttpSettingsDep = Annotated[HttpSettings, Depends(get_http_settings)]
@@ -84,6 +85,7 @@ app.include_router(user_facts_router)
 app.include_router(session_router)
 app.include_router(tasks_router)
 app.include_router(evaluation_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/health")

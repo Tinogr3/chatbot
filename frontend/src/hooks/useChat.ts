@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { chat as apiChat, getHistory } from "@/lib/api";
+import { dispatchProgressUpdated } from "@/lib/progressEvents";
 
 export type ChatMessage = {
   id: string;
@@ -89,6 +90,13 @@ export function useChat(options: UseChatOptions = {}) {
           sources: data.sources?.length ? data.sources : undefined,
         };
         setMessages((prev) => [...prev, assistantMessage]);
+
+        // Si el backend ha persistido nueva evidencia + progreso (flujo de
+        // evaluación dentro de modo aprendizaje), avisamos al resto de la app
+        // (p. ej. MaturityDashboard) para que se refresque.
+        if (data.progress_updated) {
+          dispatchProgressUpdated();
+        }
       } catch (err) {
         const e = err instanceof Error ? err : new Error(String(err));
         setError(e);

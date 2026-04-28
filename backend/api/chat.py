@@ -1,13 +1,19 @@
 """
 Endpoints de chat - POST /chat
 """
-from typing import Any, List, Optional
+from typing import Any, Iterable, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.evaluation import record_learning_progress
 from chat_manager import ChatHistoryManager
+from database import get_db
 from document_registry import load_document_registry
 from logger import get_logger
+from models import Competency, LearningOutcome, Subcompetency
 from rag_engine import extract_text, initialize_agent, initialize_vector_store_async
 from router import (
     QueryCategory,
@@ -79,10 +85,53 @@ def _doc_to_source(doc: Any) -> str:
     return doc.metadata.get("source", "Desconocido") if hasattr(doc, "metadata") else "Desconocido"
 
 
+def _score_from_evaluation(*, is_correct: bool, is_partial: bool) -> float:
+    """Mapea la evaluación cualitativa del LLM a una nota numérica [0..1]."""
+    if is_correct:
+        return 1.0
+    if is_partial:
+        return 0.5
+    return 0.0
+
+
+async def _find_learning_outcome_for_sources(
+    db: AsyncSession,
+    sources: Iterable[str],
+) -> Optional[int]:
+    """Resuelve el `learning_outcome_id` más probable a partir de las fuentes.
+
+    Cada `Competency` se persiste con `document_id = filename` cuando se
+    extrae automáticamente al subir un PDF (ver `worker.process_pdf_task` →
+    `save_extracted_competencies`). Las `metadata.source` de los chunks
+    recuperados por el RAG también almacenan ese `filename`. Buscamos el
+    primer `LearningOutcome` (por `id` ascendente) cuya competencia raíz
+    apunte a alguno de los documentos involucrados en la respuesta del LLM.
+
+    Devuelve `None` si no hay competencias asociadas o las fuentes están
+    vacías. Los callers usan `None` como señal para omitir la persistencia
+    silenciosamente sin romper el flujo del chat.
+    """
+    valid_sources = [s for s in sources if s]
+    if not valid_sources:
+        return None
+
+    stmt = (
+        select(LearningOutcome.id)
+        .join(Subcompetency, LearningOutcome.subcompetency_id == Subcompetency.id)
+        .join(Competency, Subcompetency.competency_id == Competency.id)
+        .where(Competency.document_id.in_(valid_sources))
+        .order_by(LearningOutcome.id.asc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 @router.post("", response_model=ChatResponse)
 async def chat(
     body: ChatRequest,
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
     session_id = (body.session_id or x_session_id or "").strip().lower().replace(" ", "_")
     if not session_id:
@@ -98,6 +147,7 @@ async def chat(
     learning_mode = body.learning_mode
     learning_topic = body.learning_topic
     last_learning_content = body.last_learning_content or ""
+    progress_updated = False
 
     # Salir del modo aprendizaje
     if learning_mode and prompt.lower().strip() in ["salir", "exit", "terminar", "fin"]:
@@ -121,6 +171,46 @@ async def chat(
             answer = result.get("content", "No se pudo evaluar.")
             sources = list(set(_doc_to_source(d) for d in result.get("source_documents", [])))
             last_learning_content = answer
+
+            # Persistencia silenciosa de la evidencia + actualización de
+            # `UserCompetencyProgress`. Si algo falla, lo logeamos pero NO
+            # lo propagamos: el usuario debe seguir viendo la respuesta
+            # del tutor aunque el progreso no se haya podido registrar.
+            try:
+                score = _score_from_evaluation(
+                    is_correct=bool(result.get("is_correct")),
+                    is_partial=bool(result.get("is_partial")),
+                )
+                outcome_id = await _find_learning_outcome_for_sources(db, sources)
+                if outcome_id is not None:
+                    await record_learning_progress(
+                        db,
+                        session_id=session_id,
+                        learning_outcome_id=outcome_id,
+                        score=score,
+                        feedback=answer,
+                    )
+                    progress_updated = True
+                else:
+                    logger.info(
+                        "Sin learning_outcome asociado a las fuentes %s; "
+                        "omito persistencia de evidencia para session=%s.",
+                        sources,
+                        session_id,
+                    )
+            except (LookupError, SQLAlchemyError) as exc:
+                logger.warning(
+                    "No se pudo registrar el progreso (session=%s, topic=%r): %s",
+                    session_id,
+                    learning_topic,
+                    exc,
+                )
+            except Exception as exc:  # pragma: no cover - red de seguridad
+                logger.exception(
+                    "Error inesperado registrando progreso (session=%s).",
+                    session_id,
+                )
+                _ = exc  # silencia linters sobre variable no usada
     # Modo aprendizaje activado pero sin tema: el mensaje actual es el tema (iniciar sesión)
     elif learning_mode and not (learning_topic or "").strip():
         vector_store = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)
@@ -187,4 +277,5 @@ async def chat(
         sources=sources,
         learning_mode=learning_mode,
         learning_topic=learning_topic,
+        progress_updated=progress_updated,
     )
