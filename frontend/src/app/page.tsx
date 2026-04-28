@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useState } from "react";
 import LeftSidebar from "@/components/LeftSidebar";
 import MainContent from "@/components/MainContent";
 import ChatPanel from "@/components/ChatPanel";
@@ -33,21 +34,30 @@ function DashboardGate() {
 
 function DashboardLayoutWithLogout() {
   const { sessionId } = useUser();
-  const { messages, isLoading, error, sendMessage } = useChat({
+  const { messages, isLoading, error, sendMessage, isLearningMode, toggleLearningMode } = useChat({
     sessionId: sessionId ?? undefined,
   });
+  const [isChatExpanded, setIsChatExpanded] = useState(false);
+  const toggleChatExpanded = useCallback(() => setIsChatExpanded((prev) => !prev), []);
 
   if (!sessionId) return null;
 
   return (
     <div className="flex h-screen w-full bg-gray-50 overflow-hidden">
-      <LeftSidebar />
-      <MainContent onSendMessage={sendMessage} />
+      {!isChatExpanded && <LeftSidebar />}
+      <MainContent
+        onSendMessage={sendMessage}
+        hidden={isChatExpanded}
+        isLearningMode={isLearningMode}
+        onToggleLearningMode={toggleLearningMode}
+      />
       <ChatPanel
         messages={messages}
         isLoading={isLoading}
         error={error}
         scaffoldMessage="La IA está guiando tu razonamiento hacia la Arquitectura de Privacidad."
+        isExpanded={isChatExpanded}
+        onToggleExpand={toggleChatExpanded}
       />
     </div>
   );

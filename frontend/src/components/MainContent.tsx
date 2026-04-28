@@ -4,7 +4,8 @@ import {
   Filter,
   Plus,
   Camera,
-  Mic2,
+  Book,
+  BookOpen,
   HelpCircle,
   Send,
 } from "lucide-react";
@@ -16,9 +17,12 @@ import MaturityDashboard from "@/components/dashboard/MaturityDashboard";
 type MainContentProps = {
   onSendMessage?: (text: string) => void;
   chatInputRef?: React.RefObject<HTMLInputElement | null>;
+  hidden?: boolean;
+  isLearningMode?: boolean;
+  onToggleLearningMode?: () => void;
 };
 
-export default function MainContent({ onSendMessage, chatInputRef }: MainContentProps) {
+export default function MainContent({ onSendMessage, chatInputRef, hidden, isLearningMode = false, onToggleLearningMode }: MainContentProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const ref = chatInputRef ?? inputRef;
   const { username, userInitials } = useUser();
@@ -33,7 +37,7 @@ export default function MainContent({ onSendMessage, chatInputRef }: MainContent
   };
 
   return (
-    <main className="w-[55%] min-w-0 h-screen flex flex-col bg-gray-50 overflow-hidden">
+    <main className={`w-[55%] min-w-0 h-screen flex flex-col bg-gray-50 overflow-hidden${hidden ? " hidden" : ""}`}>
       {/* Top Nav compartida */}
       <header className="shrink-0 flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200">
         <nav className="flex items-center gap-6">
@@ -116,8 +120,19 @@ export default function MainContent({ onSendMessage, chatInputRef }: MainContent
             <button type="button" className="p-2 text-gray-500 hover:text-gray-700">
               <Camera className="w-5 h-5" />
             </button>
-            <button type="button" className="p-2 text-gray-500 hover:text-gray-700">
-              <Mic2 className="w-5 h-5" />
+            <button
+              type="button"
+              onClick={onToggleLearningMode}
+              aria-label={isLearningMode ? "Desactivar modo aprendizaje" : "Activar modo aprendizaje"}
+              aria-pressed={isLearningMode}
+              title={isLearningMode ? "Modo aprendizaje activo" : "Activar modo aprendizaje"}
+              className={`p-2 rounded-lg transition-colors ${
+                isLearningMode
+                  ? "text-emerald-600 bg-emerald-50 hover:bg-emerald-100"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {isLearningMode ? <BookOpen className="w-5 h-5" /> : <Book className="w-5 h-5" />}
             </button>
             <button type="button" className="p-2 text-gray-500 hover:text-gray-700">
               <HelpCircle className="w-5 h-5" />

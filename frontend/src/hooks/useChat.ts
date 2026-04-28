@@ -33,6 +33,7 @@ export function useChat(options: UseChatOptions = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [isLearningMode, setIsLearningMode] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,7 +69,7 @@ export function useChat(options: UseChatOptions = {}) {
       setError(null);
 
       try {
-        const data = await apiChat(trimmed, sessionId);
+        const data = await apiChat(trimmed, sessionId, { learning_mode: isLearningMode });
         const assistantMessage: ChatMessage = {
           id: `assistant-${Date.now()}`,
           role: "assistant",
@@ -84,7 +85,7 @@ export function useChat(options: UseChatOptions = {}) {
         setIsLoading(false);
       }
     },
-    [sessionId, isLoading, onError]
+    [sessionId, isLoading, isLearningMode, onError]
   );
 
   const clearMessages = useCallback(() => {
@@ -92,5 +93,9 @@ export function useChat(options: UseChatOptions = {}) {
     setError(null);
   }, []);
 
-  return { messages, isLoading, error, sendMessage, clearMessages, historyLoaded };
+  const toggleLearningMode = useCallback(() => {
+    setIsLearningMode((prev) => !prev);
+  }, []);
+
+  return { messages, isLoading, error, sendMessage, clearMessages, historyLoaded, isLearningMode, toggleLearningMode };
 }

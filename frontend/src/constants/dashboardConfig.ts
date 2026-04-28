@@ -37,3 +37,44 @@ export const contentCards: ContentCard[] = [
   { title: "Exámenes", count: 8, icon: FileQuestion as DashboardIcon },
 ];
 
+export type GradeLevel = "A" | "B" | "C" | "D";
+
+export type LearningCriterion = {
+  id: string;
+  name: string;
+  description: string;
+  domainPercent: number;
+  grade: GradeLevel;
+  category: string;
+};
+
+export const learningCriteria: LearningCriterion[] = [
+  {
+    id: "crit-1",
+    name: "Gobernanza de Datos",
+    description:
+      "Capacidad para diseñar políticas de gobernanza y ciclo de vida del dato.",
+    domainPercent: 85,
+    grade: "A",
+    category: "Soberanía de Datos",
+  },
+  {
+    id: "crit-2",
+    name: "Privacy by Design",
+    description:
+      "Aplicación de principios de privacidad desde la fase de diseño de sistemas.",
+    domainPercent: 52,
+    grade: "C",
+    category: "Arquitectura Privacidad",
+  },
+  {
+    id: "crit-3",
+    name: "Sesgo Algorítmico",
+    description:
+      "Identificación y mitigación de sesgos en modelos de IA y pipelines de datos.",
+    domainPercent: 68,
+    grade: "B",
+    category: "Ética en IA",
+  },
+];
+

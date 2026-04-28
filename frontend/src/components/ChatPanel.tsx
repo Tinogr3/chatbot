@@ -2,16 +2,20 @@
 
 import { useMemo, useState } from "react";
 import { Settings, ChevronRight, ChevronDown } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import type { ChatMessage } from "@/hooks/useChat";
 
 import { useUser } from "@/context/UserContext";
 import PedagogicalScaffold from "@/components/PedagogicalScaffold";
+import ExpandToggleButton from "@/components/chat/ExpandToggleButton";
 
 type ChatPanelProps = {
   messages: ChatMessage[];
   isLoading: boolean;
   error: Error | null;
   scaffoldMessage?: string;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
 };
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
@@ -22,8 +26,8 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     return (
       <div className="flex justify-start">
         <div className="max-w-[92%] space-y-0">
-          <div className="rounded-lg rounded-tl-none px-3 py-2 bg-gray-100 text-gray-800 text-sm">
-            {msg.content}
+          <div className="rounded-lg rounded-tl-none px-3 py-2 bg-gray-100 text-gray-800 prose prose-sm md:prose-base dark:prose-invert max-w-none">
+            <ReactMarkdown>{msg.content}</ReactMarkdown>
           </div>
           {hasSources && (
             <div className="mt-1 ml-1">
@@ -60,7 +64,14 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   );
 }
 
-export default function ChatPanel({ messages, isLoading, error, scaffoldMessage }: ChatPanelProps) {
+export default function ChatPanel({
+  messages,
+  isLoading,
+  error,
+  scaffoldMessage,
+  isExpanded = false,
+  onToggleExpand,
+}: ChatPanelProps) {
   const { username, sessionId } = useUser();
 
   const displayMessages = useMemo<ChatMessage[]>(() => {
@@ -78,17 +89,26 @@ export default function ChatPanel({ messages, isLoading, error, scaffoldMessage 
   }, [messages, sessionId, username]);
 
   return (
-    <aside className="w-[25%] min-w-[280px] h-screen flex flex-col bg-white border-l border-gray-200">
+    <aside
+      className={`${
+        isExpanded ? "w-full" : "w-[25%] min-w-[280px]"
+      } h-screen flex flex-col bg-white border-l border-gray-200 transition-all duration-300`}
+    >
       <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wider">
           Chat Integrado
         </h2>
-        <button
-          type="button"
-          className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-50"
-        >
-          <Settings className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onToggleExpand && (
+            <ExpandToggleButton isExpanded={isExpanded} onToggle={onToggleExpand} />
+          )}
+          <button
+            type="button"
+            className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-50"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+        </div>
       </header>
 
       {scaffoldMessage ? <PedagogicalScaffold scaffoldMessage={scaffoldMessage} /> : null}
