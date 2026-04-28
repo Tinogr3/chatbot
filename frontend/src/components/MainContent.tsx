@@ -1,18 +1,13 @@
 "use client";
 
-import {
-  Filter,
-  Plus,
-  Camera,
-  Book,
-  BookOpen,
-  HelpCircle,
-  Send,
-} from "lucide-react";
-import { useRef } from "react";
+import { User } from "lucide-react";
 import { useUser } from "@/context/UserContext";
 import { contentCards } from "@/constants/dashboardConfig";
 import MaturityDashboard from "@/components/dashboard/MaturityDashboard";
+import ChatInputBar from "@/components/chat/ChatInputBar";
+import { dictionaries } from "@/locales";
+
+const t = dictionaries.mainContent;
 
 type MainContentProps = {
   onSendMessage?: (text: string) => void;
@@ -22,19 +17,14 @@ type MainContentProps = {
   onToggleLearningMode?: () => void;
 };
 
-export default function MainContent({ onSendMessage, chatInputRef, hidden, isLearningMode = false, onToggleLearningMode }: MainContentProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const ref = chatInputRef ?? inputRef;
-  const { username, userInitials } = useUser();
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const value = ref.current?.value?.trim();
-    if (value && onSendMessage) {
-      onSendMessage(value);
-      ref.current!.value = "";
-    }
-  };
+export default function MainContent({
+  onSendMessage,
+  chatInputRef,
+  hidden,
+  isLearningMode = false,
+  onToggleLearningMode,
+}: MainContentProps) {
+  const { username } = useUser();
 
   return (
     <main className={`w-[55%] min-w-0 h-screen flex flex-col bg-gray-50 overflow-hidden${hidden ? " hidden" : ""}`}>
@@ -45,48 +35,28 @@ export default function MainContent({ onSendMessage, chatInputRef, hidden, isLea
             href="#"
             className="text-sm font-medium text-emerald-600 border-b-2 border-emerald-600 pb-0.5"
           >
-            Micro-Onboarding
+            {t.nav.microOnboarding}
           </a>
           <a href="#" className="text-sm text-gray-500 hover:text-gray-800">
-            Resumen de Audio
+            {t.nav.audioSummary}
           </a>
         </nav>
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-700">{username}</span>
           <button
             type="button"
-            className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center text-sm font-medium"
+            aria-label={t.userMenuLabel(username)}
+            className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center"
           >
-            {userInitials}
+            <User className="w-5 h-5" aria-hidden="true" focusable="false" />
           </button>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Título y acciones */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">Discovery Hub</h1>
-            <p className="text-gray-500 mt-0.5">
-              Explora y fortalece tus competencias críticas
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50"
-            >
-              <Filter className="w-4 h-4" />
-              Filtrar
-            </button>
-            <button
-              type="button"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600"
-            >
-              <Plus className="w-4 h-4" />
-              Nuevo Proyecto
-            </button>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-800">{t.pageTitle}</h1>
+          <p className="text-gray-500 mt-0.5">{t.pageSubtitle}</p>
         </div>
 
         <MaturityDashboard />
@@ -103,55 +73,19 @@ export default function MainContent({ onSendMessage, chatInputRef, hidden, isLea
               </div>
               <h3 className="font-semibold text-gray-800">{card.title}</h3>
               <p className="text-sm text-gray-500 mt-0.5">
-                {card.count} Activos
+                {t.activesLabel(card.count)}
               </p>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Barra de chat inferior */}
-      <form
-        onSubmit={handleSubmit}
-        className="shrink-0 p-4 bg-white border-t border-gray-200"
-      >
-        <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:ring-2 focus-within:ring-emerald-500/30 focus-within:border-emerald-500">
-          <div className="flex items-center gap-1 shrink-0">
-            <button type="button" className="p-2 text-gray-500 hover:text-gray-700">
-              <Camera className="w-5 h-5" />
-            </button>
-            <button
-              type="button"
-              onClick={onToggleLearningMode}
-              aria-label={isLearningMode ? "Desactivar modo aprendizaje" : "Activar modo aprendizaje"}
-              aria-pressed={isLearningMode}
-              title={isLearningMode ? "Modo aprendizaje activo" : "Activar modo aprendizaje"}
-              className={`p-2 rounded-lg transition-colors ${
-                isLearningMode
-                  ? "text-emerald-600 bg-emerald-50 hover:bg-emerald-100"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              {isLearningMode ? <BookOpen className="w-5 h-5" /> : <Book className="w-5 h-5" />}
-            </button>
-            <button type="button" className="p-2 text-gray-500 hover:text-gray-700">
-              <HelpCircle className="w-5 h-5" />
-            </button>
-          </div>
-          <input
-            ref={ref}
-            type="text"
-            placeholder="Pregúntale a COTUTOR algo sobre los manuales..."
-            className="flex-1 min-w-0 bg-transparent border-0 py-1.5 text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-0 text-sm"
-          />
-          <button
-            type="submit"
-            className="p-2 rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 shrink-0"
-          >
-            <Send className="w-5 h-5" />
-          </button>
-        </div>
-      </form>
+      <ChatInputBar
+        onSendMessage={onSendMessage}
+        inputRef={chatInputRef}
+        isLearningMode={isLearningMode}
+        onToggleLearningMode={onToggleLearningMode}
+      />
     </main>
   );
 }

@@ -3,8 +3,12 @@
 import { useState, type FormEvent } from "react";
 import { Sparkles } from "lucide-react";
 import { useUser } from "@/context/UserContext";
+import { dictionaries } from "@/locales";
 
 const SESSION_FIELD_NAME = "sessionId" as const;
+
+const t = dictionaries.welcomeScreen;
+const tErrors = dictionaries.errors;
 
 function getSessionIdFromForm(form: HTMLFormElement): string {
   const formData = new FormData(form);
@@ -27,7 +31,7 @@ export function WelcomeScreen() {
       login(value);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al iniciar sesión.");
+      setError(err instanceof Error ? err.message : tErrors.welcomeFallback);
     }
   };
 
@@ -54,24 +58,24 @@ export function WelcomeScreen() {
           id={titleId}
           className="text-2xl font-bold text-gray-800 text-center mb-2"
         >
-          Bienvenido al Chatbot RAG Educativo
+          {t.title}
         </h1>
         <p className="text-gray-500 text-center text-sm mb-6">
-          Introduce tu nombre de usuario o ID de sesión para continuar. Se guardará tu historial y preferencias.
+          {t.subtitle}
         </p>
         <form
           onSubmit={handleSubmit}
           className="space-y-4"
-          aria-label="Formulario de acceso con nombre de usuario o ID de sesión"
+          aria-label={t.formAriaLabel}
           noValidate
         >
           <label htmlFor={SESSION_FIELD_NAME} className="block">
-            <span className="sr-only">Nombre de usuario o ID de sesión</span>
+            <span className="sr-only">{t.inputLabel}</span>
             <input
               id={SESSION_FIELD_NAME}
               type="text"
               name={SESSION_FIELD_NAME}
-              placeholder="Ej: juan_perez, mi_sesion_123"
+              placeholder={t.inputPlaceholder}
               autoComplete="username"
               required
               aria-required="true"
@@ -92,17 +96,17 @@ export function WelcomeScreen() {
           )}
           <button
             type="submit"
-            aria-label="Iniciar sesión y entrar al chatbot con el identificador introducido"
+            aria-label={t.submitAriaLabel}
             className="w-full py-3 rounded-xl bg-emerald-500 text-white font-semibold text-sm hover:bg-emerald-600 transition-colors"
           >
-            Comenzar
+            {t.submitButton}
           </button>
         </form>
         <p
           id={hintId}
           className="text-gray-400 text-xs text-center mt-4"
         >
-          Usa siempre el mismo nombre para recuperar tu historial.
+          {t.hint}
         </p>
       </div>
     </div>

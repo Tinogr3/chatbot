@@ -544,9 +544,21 @@ def create_document_tool(vector_store: Any, filename: str, usage_guide: str) -> 
 
 
 def _chroma_persist_directory(session_id: Optional[str]) -> str:
+    """Ruta absoluta del directorio Chroma persistente para una sesión.
+
+    Crea **tanto** el directorio base como el específico de la sesión
+    (`exist_ok=True`). Es importante que el subdirectorio exista antes de que
+    ChromaDB instancie su `PersistentClient`: en la versión Rust-backed
+    (chromadb >= 1.x) si el directorio no existe en el momento de abrir el
+    SQLite, la primera escritura falla con `SQLITE_READONLY_DBMOVED`
+    (code 1032 = "attempt to write a readonly database"), porque ChromaDB
+    detecta que el inode del fichero ha cambiado entre apertura y escritura.
+    Pre-creando el directorio garantizamos un inode estable para `chroma.sqlite3`.
+    """
     base = os.path.join(os.path.dirname(__file__), "data", "chroma_db")
-    os.makedirs(base, exist_ok=True)
-    return os.path.join(base, session_id or "default")
+    persist_directory = os.path.join(base, session_id or "default")
+    os.makedirs(persist_directory, exist_ok=True)
+    return persist_directory
 
 
 def initialize_vector_store(
@@ -571,19 +583,16 @@ def initialize_vector_store(
         total_docs = len(documents)
         batch_size = _env_int("RAG_VECTOR_BATCH_SIZE", 25)
         if existing_vector_store is None:
-            if os.path.exists(persist_directory) and os.listdir(persist_directory):
-                vector_store = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
-            else:
-                first_batch = documents[: min(batch_size, total_docs)]
-                vector_store = Chroma.from_documents(
-                    documents=first_batch,
-                    embedding=embeddings,
-                    persist_directory=persist_directory
-                )
-                for i in range(batch_size, total_docs, batch_size):
-                    batch = documents[i : i + batch_size]
-                    vector_store.add_documents(batch)
-                return vector_store
+            # En todos los casos abrimos primero un cliente persistente sobre el
+            # directorio (que ya existe gracias a `_chroma_persist_directory`) y
+            # luego añadimos en lotes. Evitamos `Chroma.from_documents` con
+            # `persist_directory` porque en chromadb 1.x con backend Rust ese
+            # camino dispara `SQLITE_READONLY_DBMOVED` cuando el SQLite se crea
+            # implícitamente durante la primera escritura.
+            vector_store = Chroma(
+                persist_directory=persist_directory,
+                embedding_function=embeddings,
+            )
         else:
             vector_store = existing_vector_store
 

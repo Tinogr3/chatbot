@@ -7,6 +7,9 @@ import {
 } from "@/constants/dashboardConfig";
 import type { LearningCriterion } from "@/constants/dashboardConfig";
 import LearningCriteriaSection from "./LearningCriteriaSection";
+import { dictionaries } from "@/locales";
+
+const t = dictionaries.dashboard.maturity;
 
 export type MaturityDashboardProps = {
   title?: string;
@@ -16,9 +19,9 @@ export type MaturityDashboardProps = {
 };
 
 export default function MaturityDashboard({
-  title = "Dashboard de Madurez de Habilidades",
-  lastUpdatedText = "Actualizado hace 2h",
-  description = "Progreso dinámico según tu actividad y evaluaciones.",
+  title = t.title,
+  lastUpdatedText = t.lastUpdated,
+  description = t.description,
   criteria = learningCriteria,
 }: MaturityDashboardProps) {
   return (
@@ -68,7 +71,7 @@ export default function MaturityDashboard({
                                 ? "#6ee7b7"
                                 : "#a7f3d0",
                     }}
-                    title={`Nivel ${level}`}
+                    title={t.heatmapLevelTitle(level)}
                   />
                 ),
               )}
@@ -80,7 +83,7 @@ export default function MaturityDashboard({
       {criteria.length > 0 && (
         <div className="mt-6 border-t border-gray-100 pt-6 dark:border-gray-700">
           <h3 className="mb-4 text-base font-semibold text-gray-800 dark:text-gray-100">
-            Criterios de Aprendizaje y Calificaciones
+            {t.criteriaSectionTitle}
           </h3>
           <LearningCriteriaSection criteria={criteria} />
         </div>
@@ -88,4 +91,3 @@ export default function MaturityDashboard({
     </section>
   );
 }
-

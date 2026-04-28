@@ -1,6 +1,9 @@
 "use client";
 
 import { Maximize2, Minimize2 } from "lucide-react";
+import { dictionaries } from "@/locales";
+
+const t = dictionaries.chatPanel.expandButton;
 
 export type ExpandToggleButtonProps = {
   isExpanded: boolean;
@@ -15,7 +18,7 @@ export default function ExpandToggleButton({
     <button
       type="button"
       onClick={onToggle}
-      title={isExpanded ? "Contraer chat" : "Expandir chat"}
+      title={isExpanded ? t.collapse : t.expand}
       className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
     >
       {isExpanded ? (

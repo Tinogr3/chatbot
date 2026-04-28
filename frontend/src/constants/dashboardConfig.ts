@@ -2,6 +2,11 @@
 
 import type { ComponentType } from "react";
 import { FileQuestion, Mic, MessageSquare, Video } from "lucide-react";
+import { dictionaries } from "@/locales";
+
+const tCategories = dictionaries.dashboard.categories;
+const tCriteria = dictionaries.dashboard.learningCriteria;
+const tCards = dictionaries.mainContent.contentCards;
 
 export const HEATMAP_LEVELS: number[][] = [
   [4, 3, 2, 4, 5, 3, 4, 2, 3, 4],
@@ -17,9 +22,9 @@ export type DashboardCategory = {
 };
 
 export const categories: DashboardCategory[] = [
-  { name: "Soberanía de Datos", percent: 82 },
-  { name: "Arquitectura Privacidad", percent: 45 },
-  { name: "Ética en IA", percent: 68 },
+  { name: tCategories.dataSovereignty, percent: 82 },
+  { name: tCategories.privacyArchitecture, percent: 45 },
+  { name: tCategories.aiEthics, percent: 68 },
 ];
 
 export type DashboardIcon = ComponentType<{ className?: string }>;
@@ -31,10 +36,10 @@ export type ContentCard = {
 };
 
 export const contentCards: ContentCard[] = [
-  { title: "Video Píldoras", count: 3, icon: Video as DashboardIcon },
-  { title: "Podcasts", count: 5, icon: Mic as DashboardIcon },
-  { title: "Resúmenes", count: 12, icon: MessageSquare as DashboardIcon },
-  { title: "Exámenes", count: 8, icon: FileQuestion as DashboardIcon },
+  { title: tCards.videoPills, count: 3, icon: Video as DashboardIcon },
+  { title: tCards.podcasts, count: 5, icon: Mic as DashboardIcon },
+  { title: tCards.summaries, count: 12, icon: MessageSquare as DashboardIcon },
+  { title: tCards.exams, count: 8, icon: FileQuestion as DashboardIcon },
 ];
 
 export type GradeLevel = "A" | "B" | "C" | "D";
@@ -51,30 +56,26 @@ export type LearningCriterion = {
 export const learningCriteria: LearningCriterion[] = [
   {
     id: "crit-1",
-    name: "Gobernanza de Datos",
-    description:
-      "Capacidad para diseñar políticas de gobernanza y ciclo de vida del dato.",
+    name: tCriteria.dataGovernance.name,
+    description: tCriteria.dataGovernance.description,
     domainPercent: 85,
     grade: "A",
-    category: "Soberanía de Datos",
+    category: tCategories.dataSovereignty,
   },
   {
     id: "crit-2",
-    name: "Privacy by Design",
-    description:
-      "Aplicación de principios de privacidad desde la fase de diseño de sistemas.",
+    name: tCriteria.privacyByDesign.name,
+    description: tCriteria.privacyByDesign.description,
     domainPercent: 52,
     grade: "C",
-    category: "Arquitectura Privacidad",
+    category: tCategories.privacyArchitecture,
   },
   {
     id: "crit-3",
-    name: "Sesgo Algorítmico",
-    description:
-      "Identificación y mitigación de sesgos en modelos de IA y pipelines de datos.",
+    name: tCriteria.algorithmicBias.name,
+    description: tCriteria.algorithmicBias.description,
     domainPercent: 68,
     grade: "B",
-    category: "Ética en IA",
+    category: tCategories.aiEthics,
   },
 ];
-

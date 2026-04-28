@@ -1,16 +1,19 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/*
+ * La interfaz se diseña con paleta clara (bg-white, bg-gray-50, text-gray-800).
+ * Forzamos la variante `dark:` a comportarse como class-based para evitar que el
+ * sistema operativo del usuario invierta automáticamente colores y termine
+ * pintando texto blanco sobre fondos blancos. Mantener `dark:` listo permite
+ * añadir un toggle explícito en el futuro aplicando la clase `.dark`.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 @theme inline {

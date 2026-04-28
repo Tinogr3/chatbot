@@ -3,56 +3,58 @@
 import { useState } from "react";
 import { Plus, Search, Sparkles, X } from "lucide-react";
 import UploadManager from "@/components/UploadManager";
-import { useUser } from "@/context/UserContext";
-import NavMenu from "@/components/sidebar/NavMenu";
+import ProjectsPanel from "@/components/sidebar/ProjectsPanel";
 import UserSettings from "@/components/sidebar/UserSettings";
+import { useUser } from "@/context/UserContext";
+import { useProjects } from "@/context/ProjectsContext";
+import { dictionaries } from "@/locales";
+
+const t = dictionaries.sidebar;
+const tCommon = dictionaries.common;
 
 export default function LeftSidebar() {
-  const { sessionId, logout } = useUser();
+  const { sessionId } = useUser();
+  const { currentProject, effectiveSessionId } = useProjects();
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  if (!sessionId) return null;
+  if (!sessionId || !effectiveSessionId) return null;
 
   return (
     <aside className="w-[20%] min-w-[220px] h-screen flex flex-col bg-white border-r border-gray-200">
-      {/* Cabecera */}
       <header className="p-4 border-b border-gray-100">
         <div className="flex items-center gap-2">
           <div className="p-1.5 rounded-lg bg-emerald-500 text-white">
             <Sparkles className="w-5 h-5" />
           </div>
-          <span className="font-semibold text-gray-800">COTUTOR IA</span>
+          <span className="font-semibold text-gray-800">{tCommon.appName}</span>
         </div>
       </header>
 
-      {/* BIBLIOTECA + buscador */}
-      <div className="p-4 space-y-3">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-          Biblioteca
-        </p>
-        <p className="text-sm text-gray-800">Fuentes Verificadas</p>
+      <div className="p-4 space-y-3 border-b border-gray-100">
         <button
           type="button"
           onClick={() => setUploadModalOpen(true)}
           className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-medium hover:bg-emerald-100 transition-colors"
         >
           <Plus className="w-4 h-4 shrink-0" />
-          Nuevo Conocimiento
+          {t.newKnowledgeButton}
         </button>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="search"
-            placeholder="Buscar..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t.searchPlaceholder}
             className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 bg-gray-50 text-gray-800 placeholder:text-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
           />
         </div>
       </div>
 
-      <NavMenu />
-      <UserSettings sessionId={sessionId} onLogout={logout} />
+      <ProjectsPanel searchQuery={searchQuery} />
+      <UserSettings />
 
-      {/* Modal: Nuevo Conocimiento */}
       {uploadModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
@@ -63,14 +65,21 @@ export default function LeftSidebar() {
         >
           <div className="bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-              <h2 id="upload-modal-title" className="text-lg font-semibold text-gray-800">
-                Nuevo Conocimiento
-              </h2>
+              <div className="min-w-0">
+                <h2 id="upload-modal-title" className="text-lg font-semibold text-gray-800">
+                  {t.uploadModalTitle}
+                </h2>
+                {currentProject && (
+                  <p className="mt-0.5 text-xs text-gray-500 truncate">
+                    {t.uploadModalCurrentProject(currentProject.name)}
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setUploadModalOpen(false)}
-                className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-50"
-                aria-label="Cerrar"
+                className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-50 shrink-0"
+                aria-label={t.closeUploadModal}
               >
                 <X className="w-5 h-5" />
               </button>

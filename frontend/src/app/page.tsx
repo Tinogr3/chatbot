@@ -7,40 +7,47 @@ import ChatPanel from "@/components/ChatPanel";
 import { WelcomeScreen } from "@/components/auth/WelcomeScreen";
 import { useChat } from "@/hooks/useChat";
 import { UserProvider, useUser } from "@/context/UserContext";
+import { ProjectsProvider, useProjects } from "@/context/ProjectsContext";
+import { dictionaries } from "@/locales";
 
 export default function DashboardPage() {
   return (
     <UserProvider>
-      <DashboardGate />
+      <ProjectsProvider>
+        <DashboardGate />
+      </ProjectsProvider>
     </UserProvider>
+  );
+}
+
+function FullscreenLoading() {
+  return (
+    <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
+      <div className="text-gray-500 text-sm">{dictionaries.common.loading}</div>
+    </div>
   );
 }
 
 function DashboardGate() {
   const { sessionId, isHydrated } = useUser();
 
-  if (!isHydrated) {
-    return (
-      <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-500 text-sm">Cargando...</div>
-      </div>
-    );
-  }
-
+  if (!isHydrated) return <FullscreenLoading />;
   if (!sessionId) return <WelcomeScreen />;
 
-  return <DashboardLayoutWithLogout />;
+  return <DashboardLayout />;
 }
 
-function DashboardLayoutWithLogout() {
+function DashboardLayout() {
   const { sessionId } = useUser();
+  const { effectiveSessionId, isHydrated: projectsHydrated } = useProjects();
   const { messages, isLoading, error, sendMessage, isLearningMode, toggleLearningMode } = useChat({
-    sessionId: sessionId ?? undefined,
+    sessionId: effectiveSessionId ?? undefined,
   });
   const [isChatExpanded, setIsChatExpanded] = useState(false);
   const toggleChatExpanded = useCallback(() => setIsChatExpanded((prev) => !prev), []);
 
   if (!sessionId) return null;
+  if (!projectsHydrated || !effectiveSessionId) return <FullscreenLoading />;
 
   return (
     <div className="flex h-screen w-full bg-gray-50 overflow-hidden">
@@ -55,9 +62,11 @@ function DashboardLayoutWithLogout() {
         messages={messages}
         isLoading={isLoading}
         error={error}
-        scaffoldMessage="La IA está guiando tu razonamiento hacia la Arquitectura de Privacidad."
         isExpanded={isChatExpanded}
         onToggleExpand={toggleChatExpanded}
+        onSendMessage={sendMessage}
+        isLearningMode={isLearningMode}
+        onToggleLearningMode={toggleLearningMode}
       />
     </div>
   );

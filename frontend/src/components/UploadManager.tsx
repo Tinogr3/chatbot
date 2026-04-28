@@ -9,20 +9,68 @@ import {
   getTaskStatus,
   type TaskStatusResponse,
 } from "@/lib/api";
-import { useUser } from "@/context/UserContext";
+import { useProjects, type DocumentSource } from "@/context/ProjectsContext";
+import { dictionaries } from "@/locales";
+
+const t = dictionaries.uploadManager;
 
 const POLL_INTERVAL_MS = 1500;
 
 type TabId = "manual" | "nube" | "youtube";
 
+type TabDefinition = {
+  id: TabId;
+  label: string;
+  icon: typeof Upload;
+};
+
+const TABS: readonly TabDefinition[] = [
+  { id: "manual", label: t.tabs.manual, icon: Upload },
+  { id: "nube", label: t.tabs.cloud, icon: Cloud },
+  { id: "youtube", label: t.tabs.youtube, icon: Youtube },
+];
+
+type PendingDoc = { name: string; source: DocumentSource };
+
+/**
+ * Contexto de la tarea encolada que necesitamos para construir, en el momento
+ * SUCCESS, el listado real de documentos a registrar en el proyecto activo.
+ *
+ *  - manual / youtube: el nombre lo conocemos en el cliente (file.name / url).
+ *  - cloud: los nombres los aporta el backend en `result.filenames` (el bucket
+ *    puede contener N PDFs y queremos una entrada por archivo, no un genérico).
+ */
+type PendingTaskContext =
+  | { kind: "manual"; filename: string }
+  | { kind: "cloud" }
+  | { kind: "youtube"; url: string };
+
+function resolveDocumentsFromTask(
+  context: PendingTaskContext,
+  result: TaskStatusResponse["result"],
+): PendingDoc[] {
+  if (context.kind === "manual") {
+    return [{ name: context.filename, source: "manual" }];
+  }
+  if (context.kind === "youtube") {
+    return [{ name: context.url, source: "youtube" }];
+  }
+  const filenames = (result as { filenames?: unknown } | null | undefined)?.filenames;
+  if (!Array.isArray(filenames)) return [];
+  return filenames
+    .filter((name): name is string => typeof name === "string" && name.trim().length > 0)
+    .map((name) => ({ name, source: "cloud" as const }));
+}
+
 export default function UploadManager() {
-  const { sessionId } = useUser();
+  const { effectiveSessionId, addDocumentsToCurrent } = useProjects();
 
   const [activeTab, setActiveTab] = useState<TabId>("manual");
   const [file, setFile] = useState<File | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState<TaskStatusResponse | null>(null);
+  const [pendingTask, setPendingTask] = useState<PendingTaskContext | null>(null);
   const [nubeLoading, setNubeLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -34,6 +82,7 @@ export default function UploadManager() {
     }
     setTaskId(null);
     setTaskStatus(null);
+    setPendingTask(null);
   }, []);
 
   useEffect(() => {
@@ -62,15 +111,29 @@ export default function UploadManager() {
     };
   }, [taskId]);
 
+  useEffect(() => {
+    if (!pendingTask || !taskStatus) return;
+    if (taskStatus.status === "SUCCESS") {
+      const docs = resolveDocumentsFromTask(pendingTask, taskStatus.result);
+      if (docs.length > 0) {
+        addDocumentsToCurrent(docs);
+      }
+      setPendingTask(null);
+    } else if (taskStatus.status === "FAILURE") {
+      setPendingTask(null);
+    }
+  }, [taskStatus, pendingTask, addDocumentsToCurrent]);
+
   const handleManualUpload = async () => {
-    if (!sessionId) return;
+    if (!effectiveSessionId) return;
     if (!file) {
-      setError("Selecciona un archivo PDF");
+      setError(t.manual.missingFileError);
       return;
     }
     setError(null);
     try {
-      const { task_id } = await uploadPdf(file, sessionId);
+      const { task_id } = await uploadPdf(file, effectiveSessionId);
+      setPendingTask({ kind: "manual", filename: file.name });
       setTaskId(task_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -78,13 +141,14 @@ export default function UploadManager() {
   };
 
   const handleLoadCloud = async () => {
-    if (!sessionId) return;
+    if (!effectiveSessionId) return;
     setError(null);
     setTaskStatus(null);
     setTaskId(null);
     setNubeLoading(true);
     try {
-      const { task_id } = await loadCloudPdfs(sessionId);
+      const { task_id } = await loadCloudPdfs(effectiveSessionId);
+      setPendingTask({ kind: "cloud" });
       setTaskId(task_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -94,15 +158,16 @@ export default function UploadManager() {
   };
 
   const handleProcessVideo = async () => {
-    if (!sessionId) return;
+    if (!effectiveSessionId) return;
     const url = youtubeUrl.trim();
     if (!url) {
-      setError("Introduce la URL del video de YouTube");
+      setError(t.youtube.missingUrlError);
       return;
     }
     setError(null);
     try {
-      const { task_id } = await processVideo(url, sessionId);
+      const { task_id } = await processVideo(url, effectiveSessionId);
+      setPendingTask({ kind: "youtube", url });
       setTaskId(task_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -114,18 +179,12 @@ export default function UploadManager() {
   const showTaskProgress = taskId && taskStatus && !isTaskDone;
   const showTaskResult = taskId && taskStatus && isTaskDone;
 
-  const tabs: { id: TabId; label: string; icon: typeof Upload }[] = [
-    { id: "manual", label: "Manual (Upload)", icon: Upload },
-    { id: "nube", label: "Nube", icon: Cloud },
-    { id: "youtube", label: "YouTube", icon: Youtube },
-  ];
-
-  if (!sessionId) return null;
+  if (!effectiveSessionId) return null;
 
   return (
     <div className="space-y-4">
       <div className="flex rounded-lg bg-gray-100 p-1">
-        {tabs.map((tab) => (
+        {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -149,7 +208,7 @@ export default function UploadManager() {
         {activeTab === "manual" && (
           <div className="space-y-3">
             <label className="block">
-              <span className="sr-only">Seleccionar PDF</span>
+              <span className="sr-only">{t.manual.selectLabel}</span>
               <input
                 type="file"
                 accept=".pdf"
@@ -167,7 +226,7 @@ export default function UploadManager() {
               disabled={!file || isTaskRunning}
               className="w-full py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Subir PDF
+              {t.manual.submit}
             </button>
           </div>
         )}
@@ -175,7 +234,7 @@ export default function UploadManager() {
         {activeTab === "nube" && (
           <div className="space-y-3">
             <p className="text-sm text-gray-500">
-              Carga todos los PDFs configurados en el bucket para esta sesión.
+              {t.cloud.description}
             </p>
             <button
               type="button"
@@ -186,10 +245,10 @@ export default function UploadManager() {
               {nubeLoading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Cargando...
+                  {t.cloud.loading}
                 </>
               ) : (
-                "Cargar PDFs del bucket"
+                t.cloud.submit
               )}
             </button>
           </div>
@@ -204,7 +263,7 @@ export default function UploadManager() {
                 setYoutubeUrl(e.target.value);
                 setError(null);
               }}
-              placeholder="https://www.youtube.com/watch?v=..."
+              placeholder={t.youtube.placeholder}
               className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-800 placeholder:text-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
             />
             <button
@@ -213,7 +272,7 @@ export default function UploadManager() {
               disabled={!youtubeUrl.trim() || isTaskRunning}
               className="w-full py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Procesar video
+              {t.youtube.submit}
             </button>
           </div>
         )}
@@ -228,7 +287,7 @@ export default function UploadManager() {
             />
           </div>
           <p className="text-sm text-gray-600">
-            {taskStatus.message || "Procesando..."}
+            {taskStatus.message || t.progress.fallbackMessage}
           </p>
         </div>
       )}
@@ -242,16 +301,16 @@ export default function UploadManager() {
           }`}
         >
           {taskStatus.status === "SUCCESS" ? (
-            <p>{typeof taskStatus.result?.message === "string" ? taskStatus.result.message : "Completado correctamente."}</p>
+            <p>{typeof taskStatus.result?.message === "string" ? taskStatus.result.message : t.result.successFallback}</p>
           ) : (
-            <p>{taskStatus.error ?? "Error desconocido."}</p>
+            <p>{taskStatus.error ?? t.result.errorFallback}</p>
           )}
           <button
             type="button"
             onClick={clearTask}
             className="mt-2 text-xs font-medium underline hover:no-underline"
           >
-            Cerrar y empezar otra
+            {t.result.closeAndStartOver}
           </button>
         </div>
       )}

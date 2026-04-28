@@ -8,6 +8,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { dictionaries } from "@/locales";
 
 const SESSION_STORAGE_KEY = "cotutor_session_id";
 
@@ -79,7 +80,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback((id: string) => {
     const normalized = normalizeSessionId(id);
     if (normalized.length === 0) {
-      throw new Error("El ID de sesión no es válido.");
+      throw new Error(dictionaries.errors.invalidSessionId);
     }
 
     setSessionId(normalized);
@@ -123,7 +124,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 export function useUser(): UserContextValue {
   const ctx = useContext(UserContext);
   if (!ctx) {
-    throw new Error("useUser debe usarse dentro de UserProvider.");
+    throw new Error(dictionaries.errors.userContextOutsideProvider);
   }
   return ctx;
 }

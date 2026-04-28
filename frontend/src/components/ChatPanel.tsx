@@ -1,21 +1,28 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Settings, ChevronRight, ChevronDown } from "lucide-react";
+import { ChevronRight, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { ChatMessage } from "@/hooks/useChat";
 
 import { useUser } from "@/context/UserContext";
-import PedagogicalScaffold from "@/components/PedagogicalScaffold";
+import { useProjects } from "@/context/ProjectsContext";
 import ExpandToggleButton from "@/components/chat/ExpandToggleButton";
+import ChatInputBar from "@/components/chat/ChatInputBar";
+import { dictionaries } from "@/locales";
+
+const t = dictionaries.chatPanel;
+const tUser = dictionaries.user;
 
 type ChatPanelProps = {
   messages: ChatMessage[];
   isLoading: boolean;
   error: Error | null;
-  scaffoldMessage?: string;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
+  onSendMessage?: (text: string) => void;
+  isLearningMode?: boolean;
+  onToggleLearningMode?: () => void;
 };
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
@@ -39,7 +46,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
                 <ChevronDown
                   className={`w-3.5 h-3.5 shrink-0 transition-transform ${sourcesOpen ? "rotate-180" : ""}`}
                 />
-                <span>Fuentes citadas ({msg.sources!.length})</span>
+                <span>{t.sourcesLabel(msg.sources!.length)}</span>
               </button>
               {sourcesOpen && (
                 <ul className="mt-1 pl-4 pr-2 py-1.5 text-xs text-gray-500 list-disc space-y-0.5 border-l border-gray-200 ml-2">
@@ -68,25 +75,28 @@ export default function ChatPanel({
   messages,
   isLoading,
   error,
-  scaffoldMessage,
   isExpanded = false,
   onToggleExpand,
+  onSendMessage,
+  isLearningMode = false,
+  onToggleLearningMode,
 }: ChatPanelProps) {
-  const { username, sessionId } = useUser();
+  const { username } = useUser();
+  const { currentProjectId } = useProjects();
 
   const displayMessages = useMemo<ChatMessage[]>(() => {
     if (messages.length > 0) return messages;
 
-    const safeName = username?.trim() ? username : "Usuario";
+    const safeName = username?.trim() ? username : tUser.defaultUsername;
 
     return [
       {
-        id: `welcome-assistant-${sessionId ?? "anon"}`,
+        id: `welcome-assistant-${currentProjectId ?? "anon"}`,
         role: "assistant",
-        content: `Hola ${safeName}, soy COTUTOR IA. ¿En qué puedo ayudarte hoy?`,
+        content: t.welcomeMessage(safeName),
       },
     ];
-  }, [messages, sessionId, username]);
+  }, [messages, currentProjectId, username]);
 
   return (
     <aside
@@ -96,22 +106,14 @@ export default function ChatPanel({
     >
       <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wider">
-          Chat Integrado
+          {t.title}
         </h2>
         <div className="flex items-center gap-1">
           {onToggleExpand && (
             <ExpandToggleButton isExpanded={isExpanded} onToggle={onToggleExpand} />
           )}
-          <button
-            type="button"
-            className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-50"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
         </div>
       </header>
-
-      {scaffoldMessage ? <PedagogicalScaffold scaffoldMessage={scaffoldMessage} /> : null}
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
         {displayMessages.map((msg) => (
@@ -125,7 +127,7 @@ export default function ChatPanel({
                 <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:150ms]" />
                 <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:300ms]" />
               </span>
-              Cotutor está analizando tu respuesta...
+              {t.loadingMessage}
             </div>
           </div>
         )}
@@ -136,15 +138,23 @@ export default function ChatPanel({
         )}
       </div>
 
-      <div className="shrink-0 p-4 border-t border-gray-100">
-        <button
-          type="button"
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200"
-        >
-          Ver historial completo
-          <ChevronRight className="w-4 h-4" />
-        </button>
-      </div>
+      {isExpanded ? (
+        <ChatInputBar
+          onSendMessage={onSendMessage}
+          isLearningMode={isLearningMode}
+          onToggleLearningMode={onToggleLearningMode}
+        />
+      ) : (
+        <div className="shrink-0 p-4 border-t border-gray-100">
+          <button
+            type="button"
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200"
+          >
+            {t.historyButton}
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

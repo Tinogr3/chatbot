@@ -11,13 +11,18 @@ export type ChatMessage = {
 };
 
 type UseChatOptions = {
+  /**
+   * Identificador de sesión que se envía al backend (`X-Session-Id`).
+   * Si es `undefined` el hook permanece inactivo: no carga historial ni acepta envíos.
+   * Cuando cambia, los mensajes se vacían y se vuelve a leer el historial correspondiente.
+   */
   sessionId?: string;
   onError?: (error: Error) => void;
 };
 
-const DEFAULT_SESSION_ID = "usuario_test";
-
-function mapHistoryToMessages(messages: { role: string; content: string; sources?: string[] | null }[]): ChatMessage[] {
+function mapHistoryToMessages(
+  messages: { role: string; content: string; sources?: string[] | null }[],
+): ChatMessage[] {
   return messages.map((m, i) => ({
     id: `${m.role}-history-${i}-${Date.now()}`,
     role: m.role === "assistant" ? "assistant" : "user",
@@ -27,8 +32,7 @@ function mapHistoryToMessages(messages: { role: string; content: string; sources
 }
 
 export function useChat(options: UseChatOptions = {}) {
-  const sessionId = options.sessionId ?? DEFAULT_SESSION_ID;
-  const onError = options.onError;
+  const { sessionId, onError } = options;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -37,7 +41,15 @@ export function useChat(options: UseChatOptions = {}) {
 
   useEffect(() => {
     let cancelled = false;
+    setMessages([]);
+    setError(null);
     setHistoryLoaded(false);
+
+    if (!sessionId) {
+      setHistoryLoaded(true);
+      return;
+    }
+
     getHistory(sessionId)
       .then((res) => {
         if (cancelled) return;
@@ -57,7 +69,7 @@ export function useChat(options: UseChatOptions = {}) {
   const sendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed || isLoading) return;
+      if (!trimmed || isLoading || !sessionId) return;
 
       const userMessage: ChatMessage = {
         id: `user-${Date.now()}`,
@@ -85,7 +97,7 @@ export function useChat(options: UseChatOptions = {}) {
         setIsLoading(false);
       }
     },
-    [sessionId, isLoading, isLearningMode, onError]
+    [sessionId, isLoading, isLearningMode, onError],
   );
 
   const clearMessages = useCallback(() => {
@@ -97,5 +109,14 @@ export function useChat(options: UseChatOptions = {}) {
     setIsLearningMode((prev) => !prev);
   }, []);
 
-  return { messages, isLoading, error, sendMessage, clearMessages, historyLoaded, isLearningMode, toggleLearningMode };
+  return {
+    messages,
+    isLoading,
+    error,
+    sendMessage,
+    clearMessages,
+    historyLoaded,
+    isLearningMode,
+    toggleLearningMode,
+  };
 }

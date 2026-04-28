@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { dictionaries } from "@/locales";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "COTUTOR IA - Discovery Hub",
-  description: "Explora y fortalece tus competencias críticas",
+  title: dictionaries.common.metadataTitle,
+  description: dictionaries.common.metadataDescription,
 };
 
 export default function RootLayout({
