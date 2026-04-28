@@ -33,7 +33,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     return (
       <div className="flex justify-start">
         <div className="max-w-[92%] space-y-0">
-          <div className="rounded-lg rounded-tl-none px-3 py-2 bg-gray-100 text-gray-800 prose prose-sm md:prose-base dark:prose-invert max-w-none">
+          <div className="rounded-lg rounded-tl-none px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-100 prose prose-sm md:prose-base dark:prose-invert max-w-none">
             <ReactMarkdown>{msg.content}</ReactMarkdown>
           </div>
           {hasSources && (
@@ -41,7 +41,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
               <button
                 type="button"
                 onClick={() => setSourcesOpen((o) => !o)}
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 rounded px-2 py-1 hover:bg-gray-50 border border-transparent hover:border-gray-100"
+                className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent hover:border-gray-100 dark:hover:border-gray-700"
               >
                 <ChevronDown
                   className={`w-3.5 h-3.5 shrink-0 transition-transform ${sourcesOpen ? "rotate-180" : ""}`}
@@ -49,7 +49,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
                 <span>{t.sourcesLabel(msg.sources!.length)}</span>
               </button>
               {sourcesOpen && (
-                <ul className="mt-1 pl-4 pr-2 py-1.5 text-xs text-gray-500 list-disc space-y-0.5 border-l border-gray-200 ml-2">
+                <ul className="mt-1 pl-4 pr-2 py-1.5 text-xs text-gray-500 dark:text-gray-400 list-disc space-y-0.5 border-l border-gray-200 dark:border-gray-700 ml-2">
                   {msg.sources!.map((src, i) => (
                     <li key={i}>{src}</li>
                   ))}
@@ -102,10 +102,10 @@ export default function ChatPanel({
     <aside
       className={`${
         isExpanded ? "w-full" : "w-[25%] min-w-[280px]"
-      } h-screen flex flex-col bg-white border-l border-gray-200 transition-all duration-300`}
+      } h-screen flex flex-col bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 transition-all duration-300`}
     >
-      <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wider">
+      <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+        <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100 uppercase tracking-wider">
           {t.title}
         </h2>
         <div className="flex items-center gap-1">
@@ -121,18 +121,18 @@ export default function ChatPanel({
         ))}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="rounded-lg rounded-tl-none px-3 py-2 bg-gray-100 text-gray-500 text-sm flex items-center gap-2">
+            <div className="rounded-lg rounded-tl-none px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-sm flex items-center gap-2">
               <span className="inline-flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:300ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500 animate-bounce [animation-delay:0ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500 animate-bounce [animation-delay:150ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500 animate-bounce [animation-delay:300ms]" />
               </span>
               {t.loadingMessage}
             </div>
           </div>
         )}
         {error && (
-          <div className="rounded-lg px-3 py-2 bg-red-50 text-red-700 text-sm">
+          <div className="rounded-lg px-3 py-2 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-sm">
             {error.message}
           </div>
         )}
@@ -145,10 +145,10 @@ export default function ChatPanel({
           onToggleLearningMode={onToggleLearningMode}
         />
       ) : (
-        <div className="shrink-0 p-4 border-t border-gray-100">
+        <div className="shrink-0 p-4 border-t border-gray-100 dark:border-gray-800">
           <button
             type="button"
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200"
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700"
           >
             {t.historyButton}
             <ChevronRight className="w-4 h-4" />

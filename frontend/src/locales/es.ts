@@ -128,10 +128,6 @@ export const dictionaries = {
   },
 
   mainContent: {
-    nav: {
-      microOnboarding: "Micro-Onboarding",
-      audioSummary: "Resumen de Audio",
-    },
     pageTitle: "Discovery Hub",
     pageSubtitle: "Explora y fortalece tus competencias críticas",
     newProjectButton: "Nuevo Proyecto",

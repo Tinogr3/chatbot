@@ -98,12 +98,12 @@ export default function UserSettings() {
   }, [effectiveSessionId]);
 
   return (
-    <div className="p-3 border-t border-gray-100 space-y-2">
+    <div className="p-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
       <div className="relative" ref={settingsRef}>
         <button
           type="button"
           onClick={() => setSettingsOpen((o) => !o)}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-700 text-sm font-medium hover:bg-gray-100"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700"
           aria-expanded={settingsOpen}
           aria-haspopup="true"
         >
@@ -113,7 +113,7 @@ export default function UserSettings() {
         </button>
 
         {settingsOpen && (
-          <div className="absolute bottom-full left-0 right-0 mb-1 py-1 rounded-lg border border-gray-200 bg-white shadow-lg z-10">
+          <div className="absolute bottom-full left-0 right-0 mb-1 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-10">
             <button
               type="button"
               onClick={() => {
@@ -121,7 +121,7 @@ export default function UserSettings() {
                 setSettingsOpen(false);
               }}
               disabled={!!actionLoading}
-              className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
             >
               <LogOut className="w-4 h-4 shrink-0" />
               {actionLoading === "clear" ? t.clearSessionLoading : t.clearSession}
@@ -130,7 +130,7 @@ export default function UserSettings() {
               type="button"
               onClick={handleDeleteUserFacts}
               disabled={!!actionLoading}
-              className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
             >
               <Trash2 className="w-4 h-4 shrink-0" />
               {actionLoading === "facts" ? t.forgetDataLoading : t.forgetData}
@@ -144,8 +144,8 @@ export default function UserSettings() {
           role="status"
           className={`rounded-lg border px-3 py-2 text-xs shadow-sm ${
             toast.type === "error"
-              ? "border-red-200 bg-red-50 text-red-800"
-              : "border-emerald-200 bg-emerald-50 text-emerald-800"
+              ? "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-200"
+              : "border-emerald-200 dark:border-emerald-700/50 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
           }`}
         >
           {toast.message}
@@ -165,9 +165,9 @@ export default function UserSettings() {
             }
           }}
         >
-          <div className="bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-sm overflow-hidden">
-            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100">
-              <h2 id="confirm-clear-title" className="text-base font-semibold text-gray-800">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-800 w-full max-w-sm overflow-hidden">
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+              <h2 id="confirm-clear-title" className="text-base font-semibold text-gray-800 dark:text-gray-100">
                 {tConfirm.title}
               </h2>
               <button
@@ -175,22 +175,22 @@ export default function UserSettings() {
                 onClick={() => setConfirmOpen(false)}
                 disabled={actionLoading === "clear"}
                 aria-label={tConfirm.cancel}
-                className="p-1 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-50 disabled:opacity-50"
+                className="p-1 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 rounded hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="px-5 py-4">
-              <p id="confirm-clear-description" className="text-sm text-gray-600">
+              <p id="confirm-clear-description" className="text-sm text-gray-600 dark:text-gray-300">
                 {tConfirm.description}
               </p>
             </div>
-            <div className="flex items-center justify-end gap-2 px-5 py-3 bg-gray-50 border-t border-gray-100">
+            <div className="flex items-center justify-end gap-2 px-5 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">
               <button
                 type="button"
                 onClick={() => setConfirmOpen(false)}
                 disabled={actionLoading === "clear"}
-                className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
               >
                 {tConfirm.cancel}
               </button>

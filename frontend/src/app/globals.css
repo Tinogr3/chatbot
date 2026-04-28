@@ -2,18 +2,26 @@
 @plugin "@tailwindcss/typography";
 
 /*
- * La interfaz se diseña con paleta clara (bg-white, bg-gray-50, text-gray-800).
- * Forzamos la variante `dark:` a comportarse como class-based para evitar que el
- * sistema operativo del usuario invierta automáticamente colores y termine
- * pintando texto blanco sobre fondos blancos. Mantener `dark:` listo permite
- * añadir un toggle explícito en el futuro aplicando la clase `.dark`.
+ * Variables de tema sincronizadas con `prefers-color-scheme`.
+ *
+ *  - `color-scheme: light dark` informa al navegador para que renderice scrollbars,
+ *    selección de texto y form controls nativos siguiendo el tema actual.
+ *  - Las variables `--background` / `--foreground` son las que el `body` aplica.
+ *  - La variante `dark:` de Tailwind v4 sigue por defecto `prefers-color-scheme: dark`,
+ *    así que cualquier clase `dark:*` añadida en los componentes se activa en
+ *    sintonía con el tema del sistema sin necesidad de `@custom-variant`.
  */
-@custom-variant dark (&:where(.dark, .dark *));
-
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --background: #ffffff;
   --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0b0f17;
+    --foreground: #ededed;
+  }
 }
 
 @theme inline {

@@ -183,7 +183,7 @@ export default function UploadManager() {
 
   return (
     <div className="space-y-4">
-      <div className="flex rounded-lg bg-gray-100 p-1">
+      <div className="flex rounded-lg bg-gray-100 dark:bg-gray-800 p-1">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -194,8 +194,8 @@ export default function UploadManager() {
             }}
             className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
               activeTab === tab.id
-                ? "bg-white text-emerald-700 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
+                ? "bg-white dark:bg-gray-900 text-emerald-700 dark:text-emerald-300 shadow-sm"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
             }`}
           >
             <tab.icon className="w-4 h-4 shrink-0" />
@@ -217,7 +217,7 @@ export default function UploadManager() {
                   setFile(f ?? null);
                   setError(null);
                 }}
-                className="block w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:font-medium file:cursor-pointer hover:file:bg-emerald-100"
+                className="block w-full text-sm text-gray-600 dark:text-gray-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-emerald-50 dark:file:bg-emerald-500/10 file:text-emerald-700 dark:file:text-emerald-300 file:font-medium file:cursor-pointer hover:file:bg-emerald-100 dark:hover:file:bg-emerald-500/20"
               />
             </label>
             <button
@@ -233,7 +233,7 @@ export default function UploadManager() {
 
         {activeTab === "nube" && (
           <div className="space-y-3">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               {t.cloud.description}
             </p>
             <button
@@ -264,7 +264,7 @@ export default function UploadManager() {
                 setError(null);
               }}
               placeholder={t.youtube.placeholder}
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-800 placeholder:text-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
             />
             <button
               type="button"
@@ -279,14 +279,14 @@ export default function UploadManager() {
       </div>
 
       {showTaskProgress && taskStatus && (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
-          <div className="h-2 rounded-full bg-emerald-200 overflow-hidden">
+        <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-3 space-y-2">
+          <div className="h-2 rounded-full bg-emerald-200 dark:bg-emerald-700 overflow-hidden">
             <div
               className="h-full rounded-full bg-emerald-500 transition-all duration-300"
               style={{ width: `${Math.round((taskStatus.progress ?? 0) * 100)}%` }}
             />
           </div>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-gray-600 dark:text-gray-300">
             {taskStatus.message || t.progress.fallbackMessage}
           </p>
         </div>
@@ -296,8 +296,8 @@ export default function UploadManager() {
         <div
           className={`rounded-lg border p-3 text-sm ${
             taskStatus.status === "SUCCESS"
-              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-              : "bg-red-50 border-red-200 text-red-800"
+              ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-700/50 text-emerald-800 dark:text-emerald-200"
+              : "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200"
           }`}
         >
           {taskStatus.status === "SUCCESS" ? (
@@ -316,7 +316,7 @@ export default function UploadManager() {
       )}
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 px-3 py-2 text-sm text-red-700 dark:text-red-300">
           {error}
         </div>
       )}

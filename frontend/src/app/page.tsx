@@ -22,8 +22,8 @@ export default function DashboardPage() {
 
 function FullscreenLoading() {
   return (
-    <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center">
-      <div className="text-gray-500 text-sm">{dictionaries.common.loading}</div>
+    <div className="min-h-screen w-full bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+      <div className="text-gray-500 dark:text-gray-400 text-sm">{dictionaries.common.loading}</div>
     </div>
   );
 }
@@ -50,7 +50,7 @@ function DashboardLayout() {
   if (!projectsHydrated || !effectiveSessionId) return <FullscreenLoading />;
 
   return (
-    <div className="flex h-screen w-full bg-gray-50 overflow-hidden">
+    <div className="flex h-screen w-full bg-gray-50 dark:bg-gray-950 overflow-hidden">
       {!isChatExpanded && <LeftSidebar />}
       <MainContent
         onSendMessage={sendMessage}
