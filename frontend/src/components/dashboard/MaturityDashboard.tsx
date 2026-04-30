@@ -1,151 +1,143 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useProjects } from "@/context/ProjectsContext";
 import {
   getDashboardCompetencies,
   type DashboardCompetencyItem,
+  type DashboardDocumentCompetencies,
 } from "@/lib/api";
 import { useProgressUpdated } from "@/lib/progressEvents";
-import {
-  HEATMAP_LEVELS,
-  categories,
-  type GradeLevel,
-  type LearningCriterion,
-} from "@/constants/dashboardConfig";
 import { dictionaries } from "@/locales";
-
-import LearningCriteriaSection from "./LearningCriteriaSection";
 
 const t = dictionaries.dashboard.maturity;
 
 // ---------------------------------------------------------------------------
-// Mapeo backend → frontend
+// Puntuación 0–1 (backend) → color del indicador (negro sin práctica → verde claro)
 // ---------------------------------------------------------------------------
 
-/**
- * Convierte el `score` del backend (0.0–1.0) en `domainPercent` (0–100)
- * con redondeo entero. Aplica clamp defensivo y trata `NaN`/`Infinity`
- * como 0 para no propagar valores corruptos al UI.
- */
-function scoreToDomainPercent(score: number): number {
+function clamp01(score: number): number {
   const safe = Number.isFinite(score) ? score : 0;
-  const clamped = Math.max(0, Math.min(1, safe));
-  return Math.round(clamped * 100);
+  return Math.max(0, Math.min(1, safe));
 }
 
 /**
- * Asigna grade en base al `domainPercent`:
- *   > 90  → A
- *   > 75  → B
- *   > 60  → C
- *   resto → D
+ * Interpolación en HSL: sin práctica (t≈0) → negro neutro; con práctica suben
+ * saturación y luminosidad hasta un verde claro tipo esmeralda.
  */
-function gradeFromPercent(percent: number): GradeLevel {
-  if (percent > 90) return "A";
-  if (percent > 75) return "B";
-  if (percent > 60) return "C";
-  return "D";
+function scoreToPracticeColor(score: number): string {
+  const t = clamp01(score);
+  const hue = 152;
+  const sat = t * 72;
+  const light = 5 + t * 82;
+  return `hsl(${hue} ${sat}% ${light}%)`;
 }
 
-/**
- * Transforma un `DashboardCompetencyItem` (backend) en `LearningCriterion`
- * (UI). El `id` se compone con el índice + nombre para garantizar unicidad
- * estable dentro de la respuesta y servir como `key` en React.
- */
-export function mapCompetencyToCriterion(
-  item: DashboardCompetencyItem,
-  index: number,
-): LearningCriterion {
-  const domainPercent = scoreToDomainPercent(item.score);
-  return {
-    id: `competency-${index}-${item.name}`,
-    name: item.name,
-    domainPercent,
-    grade: gradeFromPercent(domainPercent),
-    category: item.name,
-  };
+function scoreToPracticePercent(score: number): number {
+  return Math.round(clamp01(score) * 100);
 }
 
-// ---------------------------------------------------------------------------
-// Skeleton
-// ---------------------------------------------------------------------------
+function formatDocumentTitle(documentId: string): string {
+  try {
+    const base = documentId.split(/[/\\]/).pop() ?? documentId;
+    return decodeURIComponent(base);
+  } catch {
+    return documentId;
+  }
+}
 
-/**
- * Skeleton minimalista que respeta el grid de `LearningCriteriaSection`
- * (`sm:grid-cols-2 lg:grid-cols-3`) y la silueta de cada tarjeta: badge de
- * grade, título, descripción y barra de progreso. Animación `animate-pulse`
- * y mismas clases de tema que el contenido real para evitar saltos visuales
- * cuando los datos llegan.
- */
-function LearningCriteriaSkeleton() {
+function CompetencyPracticeSquare({ score }: { score: number }) {
+  const pct = scoreToPracticePercent(score);
+  const bg = scoreToPracticeColor(score);
   return (
     <div
-      className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
-      role="status"
-      aria-live="polite"
-      aria-label={t.criteriaLoading}
-    >
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="flex animate-pulse flex-col gap-3 rounded-xl border border-gray-100 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800"
-          aria-hidden="true"
-        >
-          <div className="flex items-start gap-3">
-            <div className="h-8 w-8 shrink-0 rounded-lg bg-gray-200 dark:bg-gray-700" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="h-3.5 w-3/4 rounded bg-gray-200 dark:bg-gray-700" />
-              <div className="h-3 w-full rounded bg-gray-100 dark:bg-gray-700/60" />
-            </div>
-          </div>
+      className="h-8 w-8 shrink-0 rounded-md border border-black/15 shadow-sm dark:border-white/15"
+      style={{ backgroundColor: bg }}
+      role="img"
+      aria-label={t.practiceLevelAriaLabel(pct)}
+      title={t.practiceLevelTitle(pct)}
+    />
+  );
+}
 
-          <div className="flex items-center gap-2">
-            <div className="h-2 flex-1 rounded-full bg-gray-100 dark:bg-gray-700" />
-            <div className="h-3 w-8 rounded bg-gray-200 dark:bg-gray-700" />
-          </div>
-        </div>
-      ))}
-      <span className="sr-only">{t.criteriaLoading}</span>
+function CompetencyRow({ item }: { item: DashboardCompetencyItem }) {
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-100 bg-gray-50/80 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-900/40">
+      <span className="min-w-0 flex-1 text-sm font-medium text-gray-800 dark:text-gray-100">
+        {item.name}
+      </span>
+      <div className="flex shrink-0 items-center">
+        <CompetencyPracticeSquare score={item.score} />
+      </div>
+    </li>
+  );
+}
+
+function DocumentBlock({ block }: { block: DashboardDocumentCompetencies }) {
+  const title = formatDocumentTitle(block.document_id);
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white p-4 dark:border-gray-700 dark:bg-gray-900/50">
+      <h3 className="mb-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+        {title}
+      </h3>
+      {block.competencies.length === 0 ? (
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t.noCompetenciesYet}</p>
+      ) : (
+        <ul className="space-y-2">
+          {block.competencies.map((c, i) => (
+            <CompetencyRow
+              key={`${block.document_id}-${i}-${c.name}`}
+              item={c}
+            />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Componente principal
-// ---------------------------------------------------------------------------
+function DashboardSkeleton() {
+  return (
+    <div
+      className="space-y-4"
+      role="status"
+      aria-live="polite"
+      aria-label={t.loadingLabel}
+    >
+      {[0, 1].map((i) => (
+        <div
+          key={i}
+          className="animate-pulse rounded-xl border border-gray-100 bg-white p-4 dark:border-gray-700 dark:bg-gray-900/50"
+        >
+          <div className="mb-3 h-4 w-1/3 rounded bg-gray-200 dark:bg-gray-700" />
+          <div className="space-y-2">
+            <div className="h-10 rounded-lg bg-gray-100 dark:bg-gray-800" />
+            <div className="h-10 rounded-lg bg-gray-100 dark:bg-gray-800" />
+          </div>
+        </div>
+      ))}
+      <span className="sr-only">{t.loadingLabel}</span>
+    </div>
+  );
+}
 
 export type MaturityDashboardProps = {
-  title?: string;
-  lastUpdatedText?: string;
-  description?: string;
   /**
-   * Override opcional para tests/storybook. Si se pasa, se usa tal cual y
-   * el componente no realiza fetch al backend.
+   * Override para tests: si se pasa, no se hace fetch al backend.
    */
-  criteria?: LearningCriterion[];
+  documentsOverride?: DashboardDocumentCompetencies[] | null;
 };
 
-export default function MaturityDashboard({
-  title = t.title,
-  lastUpdatedText = t.lastUpdated,
-  description = t.description,
-  criteria: criteriaOverride,
-}: MaturityDashboardProps) {
-  const { effectiveSessionId } = useProjects();
-  const [fetchedCriteria, setFetchedCriteria] = useState<LearningCriterion[] | null>(
-    null,
+export default function MaturityDashboard({ documentsOverride }: MaturityDashboardProps) {
+  const { effectiveSessionId, currentProject } = useProjects();
+  const projectDocumentNames = useMemo(
+    () => currentProject?.documents.map((d) => d.name).filter(Boolean) ?? [],
+    [currentProject?.documents],
   );
-  const [loading, setLoading] = useState<boolean>(criteriaOverride === undefined);
+  const [fetched, setFetched] = useState<DashboardDocumentCompetencies[] | null>(null);
+  const [loading, setLoading] = useState<boolean>(documentsOverride === undefined);
   const [error, setError] = useState<string | null>(null);
-  /**
-   * Bumpear este contador re-dispara el `useEffect` de fetch sin invalidar
-   * sus otras dependencias. Se incrementa cuando llega un evento global de
-   * progreso actualizado (vía `useProgressUpdated`), por ejemplo después de
-   * que el usuario responde correctamente en modo aprendizaje y el backend
-   * persiste la evidencia.
-   */
   const [refreshKey, setRefreshKey] = useState(0);
 
   const handleProgressUpdated = useCallback(() => {
@@ -153,22 +145,15 @@ export default function MaturityDashboard({
   }, []);
   useProgressUpdated(handleProgressUpdated);
 
-  /**
-   * Fetch dinámico al montar (y al cambiar de proyecto/usuario, ya que
-   * `effectiveSessionId` cambia con la combinación user+project, o cuando
-   * `refreshKey` se incrementa por un evento de progreso). Se cancela de
-   * forma segura con un flag `cancelled` para descartar respuestas
-   * pertenecientes a un sessionId previo si el usuario navega rápido.
-   */
   useEffect(() => {
-    if (criteriaOverride !== undefined) {
+    if (documentsOverride !== undefined) {
       setLoading(false);
       setError(null);
       return;
     }
 
     if (!effectiveSessionId) {
-      setFetchedCriteria([]);
+      setFetched([]);
       setLoading(false);
       setError(null);
       return;
@@ -178,16 +163,19 @@ export default function MaturityDashboard({
     setLoading(true);
     setError(null);
 
-    getDashboardCompetencies(effectiveSessionId)
+    getDashboardCompetencies(
+      effectiveSessionId,
+      projectDocumentNames.length > 0 ? projectDocumentNames : undefined,
+    )
       .then((response) => {
         if (cancelled) return;
-        setFetchedCriteria(response.competencies.map(mapCompetencyToCriterion));
+        setFetched(response.documents);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : String(err);
         setError(message || t.criteriaError);
-        setFetchedCriteria([]);
+        setFetched([]);
       })
       .finally(() => {
         if (cancelled) return;
@@ -197,82 +185,35 @@ export default function MaturityDashboard({
     return () => {
       cancelled = true;
     };
-  }, [criteriaOverride, effectiveSessionId, refreshKey]);
+  }, [documentsOverride, effectiveSessionId, projectDocumentNames, refreshKey]);
 
-  const criteria = criteriaOverride ?? fetchedCriteria ?? [];
+  const documents =
+    documentsOverride !== undefined ? documentsOverride ?? [] : fetched ?? [];
+
+  const showEmpty =
+    !loading && !error && documents.length === 0;
 
   return (
     <section className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
-          {title}
-        </h2>
-        <button
-          type="button"
-          className="shrink-0 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-        >
-          {lastUpdatedText}
-        </button>
-      </div>
-      <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-        {description}
-      </p>
+      <h2 className="mb-5 text-lg font-semibold text-gray-800 dark:text-gray-100">
+        {t.title}
+      </h2>
 
-      <div className="space-y-4">
-        {categories.map((cat, catIndex) => (
-          <div key={cat.name} className="space-y-1.5">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-700 dark:text-gray-300">{cat.name}</span>
-              <span className="font-medium text-gray-800 dark:text-gray-100">
-                {cat.percent}%
-              </span>
-            </div>
-
-            <div className="flex gap-0.5">
-              {HEATMAP_LEVELS[catIndex % HEATMAP_LEVELS.length].map(
-                (level, i) => (
-                  <div
-                    key={i}
-                    className="h-6 w-6 flex-shrink-0 rounded-sm"
-                    style={{
-                      backgroundColor:
-                        level === 5
-                          ? "#059669"
-                          : level === 4
-                            ? "#10b981"
-                            : level === 3
-                              ? "#34d399"
-                              : level === 2
-                                ? "#6ee7b7"
-                                : "#a7f3d0",
-                    }}
-                    title={t.heatmapLevelTitle(level)}
-                  />
-                ),
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-6 border-t border-gray-100 pt-6 dark:border-gray-700">
-        <h3 className="mb-4 text-base font-semibold text-gray-800 dark:text-gray-100">
-          {t.criteriaSectionTitle}
-        </h3>
-        {loading ? (
-          <LearningCriteriaSkeleton />
-        ) : error ? (
-          <p className="text-sm text-red-600 dark:text-red-400" role="alert">
-            {error}
-          </p>
-        ) : criteria.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t.criteriaEmpty}
-          </p>
-        ) : (
-          <LearningCriteriaSection criteria={criteria} />
-        )}
-      </div>
+      {loading ? (
+        <DashboardSkeleton />
+      ) : error ? (
+        <p className="text-sm text-red-600 dark:text-red-400" role="alert">
+          {error}
+        </p>
+      ) : showEmpty ? (
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t.criteriaEmpty}</p>
+      ) : (
+        <div className="space-y-4">
+          {documents.map((block) => (
+            <DocumentBlock key={block.document_id} block={block} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 
 from logger import get_logger
 from schemas import TaskEnqueuedResponse
+from session_ids import normalize_session_id
 
 logger = get_logger("api.upload")
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -20,7 +21,7 @@ async def upload_pdf(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
 ) -> TaskEnqueuedResponse:
     """Encola el procesamiento del PDF y devuelve task_id. Consultar GET /status/{task_id} para progreso."""
-    session_id = (x_session_id or "").strip().lower().replace(" ", "_")
+    session_id = normalize_session_id(x_session_id)
     if not session_id:
         raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -50,7 +51,7 @@ async def upload_pdf(
 def load_cloud_pdfs(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
 ) -> TaskEnqueuedResponse:
-    session_id = (x_session_id or "").strip().lower().replace(" ", "_")
+    session_id = normalize_session_id(x_session_id)
     if not session_id:
         raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
 

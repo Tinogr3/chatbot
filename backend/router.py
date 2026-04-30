@@ -9,6 +9,7 @@ from langchain_core.documents import Document
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from config import get_credentials_and_project
+from gemini_models import gemini_pro_model_id
 from logger import get_logger
 
 logger = get_logger("router")
@@ -39,7 +40,7 @@ def get_model(temperature: float = 0.7, max_output_tokens: int = 65535) -> Optio
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
             return ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
+                model=gemini_pro_model_id(),
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 api_key=api_key
@@ -47,7 +48,7 @@ def get_model(temperature: float = 0.7, max_output_tokens: int = 65535) -> Optio
         credentials, project_id = get_credentials_and_project()
         if credentials and project_id:
             return ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
+                model=gemini_pro_model_id(),
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 vertexai=True,

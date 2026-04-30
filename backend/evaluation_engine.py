@@ -17,6 +17,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import selectinload
 
 from config import get_credentials_and_project
+from gemini_models import gemini_flash_model_id
 from logger import get_logger
 
 logger = get_logger("evaluation_engine")
@@ -60,9 +61,10 @@ class EvaluationService:
     @staticmethod
     def _get_llm() -> ChatGoogleGenerativeAI:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        flash = gemini_flash_model_id()
         if api_key:
             return ChatGoogleGenerativeAI(
-                model="gemini-3-flash-preview",
+                model=flash,
                 google_api_key=api_key,
                 temperature=0,
             )
@@ -74,7 +76,7 @@ class EvaluationService:
                 "Configura GOOGLE_API_KEY, VERTEX_AI_API_KEY o GOOGLE_APPLICATION_CREDENTIALS."
             )
         return ChatGoogleGenerativeAI(
-            model="gemini-3-flash-preview",
+            model=flash,
             credentials=credentials,
             project=project_id,
             location="global",

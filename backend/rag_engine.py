@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field
 
 from config import get_credentials_and_project
 from exceptions import DocumentProcessingError
+from gemini_models import gemini_flash_model_id, gemini_pro_model_id
 from logger import get_logger
 from user_memory import UserMemoryManager
 
@@ -98,6 +99,12 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _bounded_env_int(name: str, default: int, low: int, high: int) -> int:
+    """Entero de entorno acotado a ``[low, high]`` (útil para paralelismo sin disparar RAM/API)."""
+    v = _env_int(name, default)
+    return max(low, min(high, v))
+
+
 def extract_text(content: Any) -> str:
     if isinstance(content, list):
         text_parts = []
@@ -112,7 +119,7 @@ def extract_text(content: Any) -> str:
 
 def get_gemini_vision_model(max_tokens: int = 65535) -> Optional[ChatGoogleGenerativeAI]:
     try:
-        vision_model = os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview"
+        vision_model = gemini_flash_model_id()
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
         if api_key:
             return ChatGoogleGenerativeAI(
@@ -273,14 +280,15 @@ Texto del documento:
 ---"""
     try:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        flash_model = gemini_flash_model_id()
         if api_key:
-            llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", google_api_key=api_key, temperature=0)
+            llm = ChatGoogleGenerativeAI(model=flash_model, google_api_key=api_key, temperature=0)
         else:
             credentials, project_id = get_credentials_and_project()
             if not credentials or not project_id:
                 return {}
             llm = ChatGoogleGenerativeAI(
-                model="gemini-3-flash-preview",
+                model=flash_model,
                 credentials=credentials,
                 project=project_id,
                 location="global",
@@ -294,28 +302,84 @@ Texto del documento:
         return {}
 
 
+def _slug_for_competency_compare(label: str) -> str:
+    """Clave normalizada para detectar nombres duplicados o casi idénticos."""
+    s = (label or "").lower().strip()
+    return re.sub(r"[^a-z0-9áéíóúñü]+", "", s, flags=re.IGNORECASE)
+
+
+def _sanitize_extracted_competency_tree(tree: "ExtractedCompetencyTree") -> "ExtractedCompetencyTree":
+    """Evita etiquetas duplicadas y descripciones de resultado idénticas entre subcompetencias."""
+    from schemas import ExtractedCompetencyTree, ExtractedLearningOutcome, ExtractedSubcompetency
+
+    main_name = " ".join((tree.competency_name or "").split())
+    seen: set[str] = {_slug_for_competency_compare(main_name)}
+    new_subs: list[ExtractedSubcompetency] = []
+
+    for i, sub in enumerate(tree.subcompetencies):
+        original = (sub.name or "").strip()
+        name = " ".join(original.split())
+        slug = _slug_for_competency_compare(name)
+        counter = 2
+        while not slug or slug in seen:
+            name = f"{original or f'Ámbito {i + 1}'} — faceta {counter}"
+            slug = _slug_for_competency_compare(name)
+            counter += 1
+        seen.add(slug)
+        desc = " ".join((sub.learning_outcomes[0].description or "").split())
+        new_subs.append(
+            ExtractedSubcompetency(
+                name=name,
+                learning_outcomes=[ExtractedLearningOutcome(description=desc)],
+            )
+        )
+
+    if (
+        len(new_subs) == 2
+        and _slug_for_competency_compare(new_subs[0].learning_outcomes[0].description)
+        == _slug_for_competency_compare(new_subs[1].learning_outcomes[0].description)
+    ):
+        d1 = new_subs[1].learning_outcomes[0].description
+        d1_unique = (
+            f"{d1.rstrip('. ')}. Debe demostrarse aplicando el criterio a «{new_subs[1].name}»."
+        )
+        new_subs[1] = ExtractedSubcompetency(
+            name=new_subs[1].name,
+            learning_outcomes=[ExtractedLearningOutcome(description=d1_unique)],
+        )
+
+    return ExtractedCompetencyTree(competency_name=main_name, subcompetencies=new_subs)
+
+
 def extract_document_competencies(text: str) -> Optional["ExtractedCompetencyTree"]:
-    """Extrae un árbol de competencias (1 general, 2 subcompetencias, 2 learning outcomes)
-    a partir del texto de un documento usando salida estructurada del LLM."""
+    """Extrae competencias prácticas y evaluables (1 competencia, 2 subcompetencias, 2 resultados)."""
     from schemas import ExtractedCompetencyTree
 
     truncated = text[:60000] if len(text) > 60000 else text
     prompt = (
-        "Eres un experto en diseño curricular por competencias. "
-        "A partir del siguiente texto extraído de un documento educativo, "
-        "identifica:\n"
-        "1. Una competencia general que el documento permite desarrollar.\n"
-        "2. Dos subcompetencias derivadas de esa competencia general.\n"
-        "3. Para cada subcompetencia, un resultado de aprendizaje (learning outcome) "
-        "concreto y evaluable que el estudiante debería demostrar.\n\n"
-        "Responde únicamente con la estructura solicitada.\n\n"
-        f"Texto del documento:\n---\n{truncated}\n---"
+        "Eres diseñador instruccional senior. A partir del TEXTO del documento (no inventes fuera de él), "
+        "define competencias útiles en el trabajo real que ese contenido habilita.\n\n"
+        "REQUISITOS ESTRICTOS:\n"
+        "• La competencia principal debe nombrar un ámbito CONCRETO del documento (norma, proceso, "
+        "herramienta, caso o rol). Prohibido dejarla en frases vacías tipo 'competencias generales', "
+        "'desarrollo integral', 'comprensión global' o 'conocimientos básicos' sin objeto.\n"
+        "• Las DOS subcompetencias deben ser ORTOGONALES: facetas distintas (p. ej. interpretación vs "
+        "aplicación, análisis vs verificación, planificación vs comunicación). No repitas la misma idea "
+        "con distintas palabras.\n"
+        "• Cada resultado de aprendizaje debe ser OBSERVABLE y EVALUABLE: verbo de acción + qué produce "
+        "o hace el estudiante + criterio o evidencia verificable (puede calificarse sí/no o con rúbrica corta). "
+        "Evita 'comprender', 'sensibilizarse', 'valorar' sin indicar evidencia observable.\n"
+        "• Redacta en español. Usa términos que aparezcan o se deduzcan claramente del texto.\n"
+        "• No dupliques nombres entre competencia principal y subcompetencias ni entre las dos subcompetencias.\n\n"
+        "Devuelve exactamente la estructura pedida (2 subcompetencias, cada una con un solo learning outcome).\n\n"
+        f"TEXTO DEL DOCUMENTO:\n---\n{truncated}\n---"
     )
     try:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        flash_model = gemini_flash_model_id()
         if api_key:
             llm = ChatGoogleGenerativeAI(
-                model="gemini-3-flash-preview", google_api_key=api_key, temperature=0
+                model=flash_model, google_api_key=api_key, temperature=0
             )
         else:
             credentials, project_id = get_credentials_and_project()
@@ -323,7 +387,7 @@ def extract_document_competencies(text: str) -> Optional["ExtractedCompetencyTre
                 logger.warning("extract_document_competencies: sin credenciales LLM disponibles")
                 return None
             llm = ChatGoogleGenerativeAI(
-                model="gemini-3-flash-preview",
+                model=flash_model,
                 credentials=credentials,
                 project=project_id,
                 location="global",
@@ -331,7 +395,9 @@ def extract_document_competencies(text: str) -> Optional["ExtractedCompetencyTre
             )
         structured_llm = llm.with_structured_output(ExtractedCompetencyTree)
         result = structured_llm.invoke(prompt)
-        return result if result else None
+        if not result:
+            return None
+        return _sanitize_extracted_competency_tree(result)
     except Exception as e:
         logger.warning("Error extrayendo competencias del documento: %s", e)
         return None
@@ -341,17 +407,31 @@ async def save_extracted_competencies(
     tree: "ExtractedCompetencyTree",
     document_id: str,
 ) -> None:
-    """Persiste un ExtractedCompetencyTree en la BD de competencias."""
+    """Persiste un ExtractedCompetencyTree en la BD de competencias.
+
+    Elimina primero cualquier competencia previa con el mismo ``document_id`` para
+    evitar duplicados al reprocesar el mismo PDF (CASCADE borra subcompetencias,
+    resultados, evidencias y progreso vinculados a esas filas).
+    """
     from database import AsyncSessionLocal, init_db
     from models import Competency, CompetencyType, LearningOutcome, Subcompetency
+    from sqlalchemy import delete
+
+    doc_key = (document_id or "").strip()
+    if not doc_key:
+        logger.warning("save_extracted_competencies: document_id vacío, abortando")
+        return
 
     await init_db()
 
     async with AsyncSessionLocal() as session:
+        await session.execute(delete(Competency).where(Competency.document_id == doc_key))
+        await session.flush()
+
         competency = Competency(
             name=tree.competency_name,
             type=CompetencyType.GENERAL,
-            document_id=document_id,
+            document_id=doc_key,
         )
         session.add(competency)
         await session.flush()
@@ -373,11 +453,56 @@ async def save_extracted_competencies(
                 session.add(lo)
 
         await session.commit()
+        saved_id = competency.id
     logger.info(
         "Competencias guardadas en BD para documento '%s' (competency_id=%d)",
         document_id,
-        competency.id,
+        saved_id,
     )
+
+
+def persist_competencies_from_chunk_documents(documents: List[Document]) -> None:
+    """Por cada ``source`` en chunks de texto, extrae y persiste competencias en BD.
+
+    Los chunks deben tener ``metadata['source']`` igual a la clave del
+    ``document_registry`` (nombre lógico del PDF), alineada con
+    ``Competency.document_id``.
+    """
+    from collections import defaultdict
+
+    text_by_source: Dict[str, List[str]] = defaultdict(list)
+    for doc in documents:
+        if doc.metadata.get("type") != "text":
+            continue
+        src = doc.metadata.get("source")
+        if not src:
+            continue
+        text_by_source[str(src)].append(doc.page_content or "")
+
+    for filename, parts in text_by_source.items():
+        summary_text = "\n".join(parts)[:60000]
+        if not summary_text.strip():
+            logger.warning(
+                "persist_competencies_from_chunk_documents: sin texto para '%s'",
+                filename,
+            )
+            continue
+        try:
+            tree = extract_document_competencies(summary_text)
+            if tree:
+                asyncio.run(save_extracted_competencies(tree, filename))
+            else:
+                logger.warning(
+                    "No se pudieron extraer competencias (LLM) para '%s'",
+                    filename,
+                )
+        except Exception as e:
+            logger.warning(
+                "Error persistiendo competencias para '%s': %s",
+                filename,
+                e,
+                exc_info=True,
+            )
 
 
 def procesar_pdf(
@@ -386,11 +511,20 @@ def procesar_pdf(
     max_tokens: int = 65535,
     session_id: Optional[str] = None,
     document_registry: Optional[Dict[str, Any]] = None,
+    logical_filename: Optional[str] = None,
 ) -> Tuple[List[Document], Dict[str, Any]]:
-    """Procesa un PDF y retorna (lista de documentos, document_registry actualizado)."""
+    """Procesa un PDF y retorna (lista de documentos, document_registry actualizado).
+
+    Si se pasa ``logical_filename`` (p. ej. el nombre original del upload),
+    se usa como clave en el registro y en metadata ``source`` de los chunks.
+    Si no, se usa el basename del path temporal (útil solo cuando coincide).
+    """
     document_registry = document_registry or {}
     try:
-        nombre_archivo = Path(ruta_archivo).name
+        if logical_filename and str(logical_filename).strip():
+            nombre_archivo = Path(str(logical_filename).strip()).name
+        else:
+            nombre_archivo = Path(ruta_archivo).name
         all_documents = []
 
         loader = PyPDFLoader(ruta_archivo)
@@ -416,6 +550,15 @@ def procesar_pdf(
 
         if document_card:
             document_registry[nombre_archivo] = document_card
+        else:
+            # El dashboard filtra por claves del registro; sin entrada no aparecen
+            # competencias aunque existan en BD y en Chroma.
+            document_registry[nombre_archivo] = {
+                "summary": "",
+                "topics": [],
+                "usage_guide": "",
+                "hypothetical_questions": [],
+            }
 
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -469,7 +612,9 @@ def procesar_pdf(
                     return (i, (desc, page_num, image_id) if desc else None)
 
                 results_by_index: List[Optional[Tuple[str, int, str]]] = [None] * len(images)
-                with ThreadPoolExecutor(max_workers=min(4, len(images))) as executor:
+                img_workers = _bounded_env_int("RAG_IMAGE_DESCRIPTION_WORKERS", 8, 1, 16)
+                pool_workers = min(img_workers, len(images))
+                with ThreadPoolExecutor(max_workers=max(1, pool_workers)) as executor:
                     futures = {executor.submit(process_one, (i, ib, pn, iid)): i
                               for i, (ib, pn, iid) in enumerate(images)}
                     for future in as_completed(futures):
@@ -581,7 +726,7 @@ def initialize_vector_store(
             return existing_vector_store
 
         total_docs = len(documents)
-        batch_size = _env_int("RAG_VECTOR_BATCH_SIZE", 25)
+        batch_size = _bounded_env_int("RAG_VECTOR_BATCH_SIZE", 40, 5, 200)
         if existing_vector_store is None:
             # En todos los casos abrimos primero un cliente persistente sobre el
             # directorio (que ya existe gracias a `_chroma_persist_directory`) y
@@ -632,6 +777,7 @@ async def procesar_pdf_async(
     max_tokens: int = 65535,
     session_id: Optional[str] = None,
     document_registry: Optional[Dict[str, Any]] = None,
+    logical_filename: Optional[str] = None,
 ) -> Tuple[List[Document], Dict[str, Any]]:
     """Versión no bloqueante para FastAPI: mismo contrato que `procesar_pdf`."""
     return await _run_in_rag_pool(
@@ -641,6 +787,7 @@ async def procesar_pdf_async(
         max_tokens=max_tokens,
         session_id=session_id,
         document_registry=document_registry,
+        logical_filename=logical_filename,
     )
 
 
@@ -656,9 +803,10 @@ def initialize_agent(
         return None
     try:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        pro_model = gemini_pro_model_id()
         if api_key:
             llm = ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
+                model=pro_model,
                 temperature=temperature,
                 max_output_tokens=max_tokens,
                 api_key=api_key,
@@ -668,7 +816,7 @@ def initialize_agent(
             if not credentials or not project_id:
                 return None
             llm = ChatGoogleGenerativeAI(
-                model=os.getenv("VERTEX_AI_MODEL") or "gemini-3-pro-preview",
+                model=pro_model,
                 temperature=temperature,
                 max_output_tokens=max_tokens,
                 vertexai=True,

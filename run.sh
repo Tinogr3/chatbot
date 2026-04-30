@@ -107,8 +107,14 @@ start_backend() {
 
 start_celery_worker() {
   echo "Iniciando worker Celery (Redis: ${REDIS_HOST}:${REDIS_PORT})..."
-  # La app de Celery está definida en backend/worker.py (módulo `backend.worker`).
-  celery -A backend.worker worker --loglevel=info &
+  # Concurrency: procesos en paralelo (cada tarea puede ser un PDF grande).
+  # Prefetch 1: no acumular muchas tareas pesadas en un solo proceso (menos picos de RAM).
+  : "${CELERY_WORKER_CONCURRENCY:=2}"
+  : "${CELERY_PREFETCH_MULTIPLIER:=1}"
+  celery -A backend.worker worker \
+    --loglevel=info \
+    --concurrency="${CELERY_WORKER_CONCURRENCY}" \
+    --prefetch-multiplier="${CELERY_PREFETCH_MULTIPLIER}" &
   CELERY_PID=$!
   PIDS+=("$CELERY_PID")
 }

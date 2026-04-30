@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ----- Chat -----
@@ -429,47 +429,81 @@ class EvaluateLearningResponse(BaseModel):
 
 
 class ExtractedLearningOutcome(BaseModel):
-    """Resultado de aprendizaje extraído por el LLM."""
+    """Resultado de aprendizaje observable y evaluable (salida LLM)."""
 
     description: str = Field(
         ...,
-        min_length=1,
-        description="Descripción del resultado de aprendizaje",
+        min_length=24,
+        max_length=520,
+        description=(
+            "Redacta un único resultado observable: verbo de acción + objeto + "
+            "criterio o producto verificable (qué debe poder hacer o producir el "
+            "estudiante). Sin vaguedades tipo 'comprender' o 'conocer' sin objeto."
+        ),
     )
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def strip_description(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 class ExtractedSubcompetency(BaseModel):
-    """Subcompetencia extraída por el LLM, con su learning outcome asociado."""
+    """Subcompetencia concreta del documento, distinta de las demás etiquetas."""
 
     name: str = Field(
         ...,
-        min_length=1,
-        max_length=255,
-        description="Nombre de la subcompetencia",
+        min_length=10,
+        max_length=200,
+        description=(
+            "Nombre corto y específico al contenido del PDF (procedimiento, norma, "
+            "herramienta o caso). Debe diferenciarse claramente de la competencia "
+            "principal y de la otra subcompetencia. Evita títulos genéricos."
+        ),
     )
     learning_outcomes: List[ExtractedLearningOutcome] = Field(
         ...,
         min_length=1,
         max_length=1,
-        description="Exactamente un resultado de aprendizaje para esta subcompetencia",
+        description="Exactamente un resultado de aprendizaje evaluable para esta subcompetencia",
     )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 class ExtractedCompetencyTree(BaseModel):
-    """Árbol completo de competencias extraído por el LLM desde un documento."""
+    """Árbol de competencias extraído del documento: anclado al texto, sin duplicar etiquetas."""
 
     competency_name: str = Field(
         ...,
-        min_length=1,
-        max_length=255,
-        description="Nombre de la competencia general del documento",
+        min_length=10,
+        max_length=200,
+        description=(
+            "Competencia principal alineada al propósito del documento (no genérica). "
+            "Debe nombrar el ámbito concreto (p. ej. normativa X, proceso Y, análisis Z). "
+            "Las dos subcompetencias deben ser facetas distintas de esta misma competencia."
+        ),
     )
     subcompetencies: List[ExtractedSubcompetency] = Field(
         ...,
         min_length=2,
         max_length=2,
-        description="Exactamente 2 subcompetencias derivadas de la competencia general",
+        description="Exactamente 2 subcompetencias: ortogonales entre sí y no redundantes",
     )
+
+    @field_validator("competency_name", mode="before")
+    @classmethod
+    def strip_competency(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 # ----- Dashboard -----
@@ -486,10 +520,23 @@ class DashboardCompetencyItem(BaseModel):
     )
 
 
-class DashboardCompetencyResponse(BaseModel):
-    """Response con la lista de competencias y sus puntuaciones para el dashboard."""
+class DashboardDocumentCompetencies(BaseModel):
+    """Bloque de competencias asociado a un documento cargado en el proyecto."""
 
+    document_id: str = Field(
+        ...,
+        description="Clave del documento en el registro (filename del PDF u origen)",
+    )
     competencies: List[DashboardCompetencyItem] = Field(
         default_factory=list,
-        description="Lista de competencias con sus puntuaciones agregadas",
+        description="Competencias extraídas de ese documento y su puntuación agregada",
+    )
+
+
+class DashboardCompetencyResponse(BaseModel):
+    """Competencias agrupadas por documento para el dashboard de aprendizaje."""
+
+    documents: List[DashboardDocumentCompetencies] = Field(
+        default_factory=list,
+        description="Un bloque por cada documento del proyecto, en orden de registro",
     )

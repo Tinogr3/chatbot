@@ -12,6 +12,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 
 from config import get_credentials_and_project
+from gemini_models import gemini_flash_model_id
 
 
 class UserFactSchema(BaseModel):
@@ -73,15 +74,17 @@ class UserMemoryManager:
                 api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
                 if not api_key:
                     return None
+                flash = gemini_flash_model_id()
                 self._llm_cache[max_tokens] = ChatGoogleGenerativeAI(
-                    model="gemini-3-flash-preview",
+                    model=flash,
                     temperature=0.1,
                     max_output_tokens=max_tokens,
                     api_key=api_key
                 )
             else:
+                flash = gemini_flash_model_id()
                 self._llm_cache[max_tokens] = ChatGoogleGenerativeAI(
-                    model="gemini-3-flash-preview",
+                    model=flash,
                     temperature=0.1,
                     max_output_tokens=max_tokens,
                     vertexai=True,

@@ -2,7 +2,6 @@
 Worker Celery - Procesamiento asíncrono de videos (YouTube/Whisper) y PDFs.
 Broker y backend: Redis. Ejecutar: celery -A worker worker --loglevel=info
 """
-import asyncio
 import logging
 import os
 import sys
@@ -49,6 +48,10 @@ def process_video_task(
     """
     Tarea asíncrona: descarga/transcribe video YouTube y añade documentos al vector store.
     """
+    from session_ids import normalize_session_id
+
+    session_id = normalize_session_id(session_id)
+
     try:
         self.update_state(state="PROGRESS", meta={"progress": 0.05, "message": "Iniciando procesamiento del video..."})
         from api.chat import invalidate_agent_cache
@@ -100,6 +103,10 @@ def process_pdf_task(
     """
     Tarea asíncrona: procesa PDF (particionado, imágenes) y añade documentos al vector store.
     """
+    from session_ids import normalize_session_id
+
+    session_id = normalize_session_id(session_id)
+
     try:
         self.update_state(state="PROGRESS", meta={"progress": 0.05, "message": "Preparando documento..."})
         from api.chat import invalidate_agent_cache
@@ -137,6 +144,7 @@ def process_pdf_task(
             max_tokens=65535,
             session_id=session_id,
             document_registry=registry,
+            logical_filename=filename,
         )
 
         if not documents:
@@ -162,28 +170,9 @@ def process_pdf_task(
         invalidate_agent_cache(session_id)
 
         try:
-            from rag_engine import extract_document_competencies, save_extracted_competencies
+            from rag_engine import persist_competencies_from_chunk_documents
 
-            summary_text = "\n".join(
-                doc.page_content for doc in documents
-                if doc.metadata.get("type") == "text"
-            )[:60000]
-
-            if summary_text:
-                competency_tree = extract_document_competencies(summary_text)
-                if competency_tree:
-                    asyncio.run(save_extracted_competencies(competency_tree, filename))
-                    n_subs = len(competency_tree.subcompetencies)
-                    n_los = sum(len(s.learning_outcomes) for s in competency_tree.subcompetencies)
-                    logger.info(
-                        "Competencias extraídas para '%s': %d entidades "
-                        "(1 competencia, %d subcompetencias, %d learning outcomes)",
-                        filename, 1 + n_subs + n_los, n_subs, n_los,
-                    )
-                else:
-                    logger.warning("No se pudieron extraer competencias para '%s'", filename)
-            else:
-                logger.warning("Sin texto disponible para extraer competencias de '%s'", filename)
+            persist_competencies_from_chunk_documents(documents)
         except Exception as e:
             logger.warning("Error en extracción de competencias para '%s': %s", filename, e)
 
@@ -217,6 +206,10 @@ def process_cloud_pdfs_task(
     Tarea asíncrona: descarga y procesa todos los PDFs del bucket GCS para una sesión.
     Replica la lógica del endpoint POST /upload/load_cloud, pero en background.
     """
+    from session_ids import normalize_session_id
+
+    session_id = normalize_session_id(session_id)
+
     self.update_state(state="PROGRESS", meta={"progress": 0.0, "message": "Preparando procesamiento PDFs desde la nube..."})
 
     # Imports locales para evitar ciclos y mantener carga inicial baja.
@@ -256,7 +249,16 @@ def process_cloud_pdfs_task(
         raise RuntimeError("Error al crear/actualizar vector store")
 
     invalidate_agent_cache(session_id)
-    self.update_state(state="PROGRESS", meta={"progress": 0.95, "message": "Finalizado."})
+    self.update_state(state="PROGRESS", meta={"progress": 0.95, "message": "Extrayendo competencias..."})
+
+    try:
+        from rag_engine import persist_competencies_from_chunk_documents
+
+        persist_competencies_from_chunk_documents(documents)
+    except Exception as e:
+        logger.warning("Error extrayendo competencias tras carga en nube: %s", e)
+
+    self.update_state(state="PROGRESS", meta={"progress": 0.98, "message": "Finalizado."})
 
     return {
         "success": True,

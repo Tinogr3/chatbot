@@ -119,6 +119,7 @@ def procesar_todos_pdfs_nube(
                     max_tokens=max_tokens,
                     session_id=session_id,
                     document_registry=document_registry,
+                    logical_filename=pdf_name,
                 )
                 os.unlink(tmp_path)
                 if docs:

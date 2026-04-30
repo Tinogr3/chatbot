@@ -150,37 +150,17 @@ export const dictionaries = {
 
   dashboard: {
     maturity: {
-      title: "Dashboard de Madurez de Habilidades",
-      lastUpdated: "Actualizado hace 2h",
-      description: "Progreso dinámico según tu actividad y evaluaciones.",
-      criteriaSectionTitle: "Criterios de Aprendizaje y Calificaciones",
-      heatmapLevelTitle: (level: number) => `Nivel ${level}`,
-      criteriaLoading: "Cargando competencias...",
+      title: "Competencias de Aprendizaje",
+      loadingLabel: "Cargando competencias…",
       criteriaEmpty:
         "Sube documentos al proyecto para que se extraigan competencias y aparezcan aquí.",
       criteriaError: "No se pudieron cargar las competencias.",
-    },
-    categories: {
-      dataSovereignty: "Soberanía de Datos",
-      privacyArchitecture: "Arquitectura Privacidad",
-      aiEthics: "Ética en IA",
-    },
-    learningCriteria: {
-      dataGovernance: {
-        name: "Gobernanza de Datos",
-        description:
-          "Capacidad para diseñar políticas de gobernanza y ciclo de vida del dato.",
-      },
-      privacyByDesign: {
-        name: "Privacy by Design",
-        description:
-          "Aplicación de principios de privacidad desde la fase de diseño de sistemas.",
-      },
-      algorithmicBias: {
-        name: "Sesgo Algorítmico",
-        description:
-          "Identificación y mitigación de sesgos en modelos de IA y pipelines de datos.",
-      },
+      noCompetenciesYet:
+        "Aún no hay competencias extraídas para este documento.",
+      practiceLevelTitle: (percent: number) =>
+        `Práctica en modo aprendizaje: ${percent} % (negro = sin practicar, verde claro = dominio)`,
+      practiceLevelAriaLabel: (percent: number) =>
+        `Nivel de práctica en modo aprendizaje: ${percent} por ciento. Negro indica sin práctica; cuanto más claro el verde, mayor dominio.`,
     },
   },
 } as const;
