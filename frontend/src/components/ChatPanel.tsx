@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import type { ChatMessage } from "@/hooks/useChat";
 
@@ -26,37 +25,13 @@ type ChatPanelProps = {
 };
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
-  const [sourcesOpen, setSourcesOpen] = useState(false);
-  const hasSources = msg.role === "assistant" && msg.sources && msg.sources.length > 0;
-
   if (msg.role === "assistant") {
     return (
       <div className="flex justify-start">
-        <div className="max-w-[92%] space-y-0">
+        <div className="max-w-[92%]">
           <div className="rounded-lg rounded-tl-none px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-100 prose prose-sm md:prose-base dark:prose-invert max-w-none">
             <ReactMarkdown>{msg.content}</ReactMarkdown>
           </div>
-          {hasSources && (
-            <div className="mt-1 ml-1">
-              <button
-                type="button"
-                onClick={() => setSourcesOpen((o) => !o)}
-                className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800 border border-transparent hover:border-gray-100 dark:hover:border-gray-700"
-              >
-                <ChevronDown
-                  className={`w-3.5 h-3.5 shrink-0 transition-transform ${sourcesOpen ? "rotate-180" : ""}`}
-                />
-                <span>{t.sourcesLabel(msg.sources!.length)}</span>
-              </button>
-              {sourcesOpen && (
-                <ul className="mt-1 pl-4 pr-2 py-1.5 text-xs text-gray-500 dark:text-gray-400 list-disc space-y-0.5 border-l border-gray-200 dark:border-gray-700 ml-2">
-                  {msg.sources!.map((src, i) => (
-                    <li key={i}>{src}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
         </div>
       </div>
     );
@@ -138,22 +113,12 @@ export default function ChatPanel({
         )}
       </div>
 
-      {isExpanded ? (
+      {isExpanded && (
         <ChatInputBar
           onSendMessage={onSendMessage}
           isLearningMode={isLearningMode}
           onToggleLearningMode={onToggleLearningMode}
         />
-      ) : (
-        <div className="shrink-0 p-4 border-t border-gray-100 dark:border-gray-800">
-          <button
-            type="button"
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700"
-          >
-            {t.historyButton}
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
       )}
     </aside>
   );

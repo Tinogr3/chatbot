@@ -48,11 +48,9 @@ export const dictionaries = {
       expand: "Expandir chat",
       collapse: "Contraer chat",
     },
-    sourcesLabel: (count: number) => `Fuentes citadas (${count})`,
     welcomeMessage: (name: string) =>
       `Hola ${name}, soy COTUTOR IA. ¿En qué puedo ayudarte hoy?`,
     loadingMessage: "Cotutor está analizando tu respuesta...",
-    historyButton: "Ver historial completo",
   },
 
   sidebar: {
