@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.evaluation import record_learning_progress
 from chat_manager import ChatHistoryManager
+from discovery_repo import add_stored_exam, add_stored_summary
 from database import get_db
 from document_registry import load_document_registry
 from logger import get_logger
@@ -19,6 +20,7 @@ from router import (
     QueryCategory,
     LearningFlowManager,
     get_direct_response,
+    get_exam_response,
     get_summary_response,
     route_query,
 )
@@ -92,6 +94,21 @@ def _score_from_evaluation(*, is_correct: bool, is_partial: bool) -> float:
     if is_partial:
         return 0.5
     return 0.0
+
+
+def _should_store_discovery_content(answer: str) -> bool:
+    """Evita guardar mensajes de error o respuestas triviales en el Discovery Hub."""
+    a = (answer or "").strip()
+    if len(a) < 30:
+        return False
+    bad_prefixes = (
+        "No hay documentos disponibles",
+        "No hay documentos cargados",
+        "No puedo generar",
+        "Error generando",
+        "Error al generar",
+    )
+    return not any(a.startswith(p) for p in bad_prefixes)
 
 
 async def _find_learning_outcome_for_sources(
@@ -236,6 +253,20 @@ async def chat(
             result = get_summary_response(prompt, vector_store, session_id, max_tokens=max_tokens)
             answer = result.get("answer", "No se pudo generar el resumen.")
             sources = list(set(_doc_to_source(d) for d in result.get("source_documents", [])))
+            if _should_store_discovery_content(answer):
+                try:
+                    await add_stored_summary(db, session_id, prompt, answer)
+                except Exception as exc:
+                    logger.warning("No se pudo guardar resumen en Discovery Hub: %s", exc)
+        elif category == QueryCategory.EXAMEN.value and vector_store:
+            result = get_exam_response(prompt, vector_store, session_id, max_tokens=max_tokens)
+            answer = result.get("answer", "No se pudo generar el examen.")
+            sources = list(set(_doc_to_source(d) for d in result.get("source_documents", [])))
+            if _should_store_discovery_content(answer):
+                try:
+                    await add_stored_exam(db, session_id, prompt, answer)
+                except Exception as exc:
+                    logger.warning("No se pudo guardar examen en Discovery Hub: %s", exc)
         elif category == QueryCategory.APRENDIZAJE.value and vector_store:
             learning_manager = LearningFlowManager(vector_store, session_id, max_tokens=max_tokens)
             result = learning_manager.start_learning_session(prompt)

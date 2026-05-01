@@ -141,10 +141,36 @@ export const dictionaries = {
       activeTitle: "Modo aprendizaje activo",
     },
     contentCards: {
-      videoPills: "Video Píldoras",
       podcasts: "Podcasts",
       summaries: "Resúmenes",
       exams: "Exámenes",
+    },
+    discoveryHub: {
+      openSummaries: "Abrir resúmenes",
+      openExams: "Abrir exámenes",
+      createAudio: "Crear audio",
+      audioLoading: "Generando audio…",
+      audioError: "No se pudo generar el audio.",
+      emptySummaries:
+        "Aún no hay resúmenes guardados. Pide un resumen de tus documentos en el chat (por ejemplo: «resume el manual»).",
+      emptyExams:
+        "Aún no hay exámenes guardados. Pide un examen o test en el chat (por ejemplo: «hazme un examen sobre el tema X»).",
+      modalSummariesTitle: "Resúmenes del chat",
+      modalExamsTitle: "Exámenes del chat",
+      promptLabel: "Tu petición",
+      listLoading: "Cargando…",
+      podcastNeedSummaries: "Primero crea resúmenes en el chat; el audio une los que elijas.",
+      podcastReadyHint: (count: number) =>
+        `Elige cuáles de los ${count} resumen(es) guardados incluir en el audio.`,
+      modalPodcastTitle: "Resúmenes para el podcast",
+      podcastPickHint:
+        "Marca uno o varios resúmenes. El audio seguirá el orden en que aparecen abajo (el más antiguo arriba).",
+      podcastSelectAll: "Marcar todos",
+      podcastSelectNone: "Quitar todos",
+      podcastNeedSelection: "Marca al menos un resumen.",
+      podcastLoadingSummaries: "Cargando resúmenes…",
+      podcastCancel: "Cancelar",
+      podcastListError: "No se pudieron cargar los resúmenes.",
     },
   },
 

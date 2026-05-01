@@ -2,10 +2,10 @@
 
 import { User } from "lucide-react";
 import { useUser } from "@/context/UserContext";
-import { contentCards } from "@/constants/dashboardConfig";
 import MaturityDashboard from "@/components/dashboard/MaturityDashboard";
 import ChatInputBar from "@/components/chat/ChatInputBar";
 import { dictionaries } from "@/locales";
+import DiscoveryHubSection from "@/components/DiscoveryHubSection";
 
 const t = dictionaries.mainContent;
 
@@ -50,22 +50,7 @@ export default function MainContent({
 
         <MaturityDashboard />
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {contentCards.map((card) => (
-            <div
-              key={card.title}
-              className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 p-5 flex flex-col items-start hover:shadow-md transition-shadow"
-            >
-              <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 mb-3">
-                <card.icon className="w-5 h-5" />
-              </div>
-              <h3 className="font-semibold text-gray-800 dark:text-gray-100">{card.title}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                {t.activesLabel(card.count)}
-              </p>
-            </div>
-          ))}
-        </div>
+        <DiscoveryHubSection />
       </div>
 
       <ChatInputBar

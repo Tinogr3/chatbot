@@ -140,6 +140,37 @@ class ClearSessionResponse(BaseModel):
     message: str = Field(..., description="Mensaje de confirmación")
 
 
+# ----- Discovery Hub -----
+class DiscoveryItemOut(BaseModel):
+    """Un resumen o examen guardado desde el chat."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(..., ge=1)
+    user_prompt: str = Field(..., description="Petición original del usuario")
+    content: str = Field(..., description="Texto generado por el asistente")
+    created_at: datetime = Field(..., description="Fecha de creación (UTC)")
+
+
+class DiscoveryStatsOut(BaseModel):
+    """Conteos para las tarjetas del Discovery Hub."""
+
+    summaries: int = Field(0, ge=0)
+    exams: int = Field(0, ge=0)
+
+
+class PodcastAudioRequest(BaseModel):
+    """Body opcional para POST /discovery/podcast-audio."""
+
+    summary_ids: Optional[List[int]] = Field(
+        None,
+        description=(
+            "IDs de resúmenes a incluir (en ese orden en la narración). "
+            "Si se omite o es null, se usan todos los resúmenes de la sesión."
+        ),
+    )
+
+
 class DeletedCountResponse(BaseModel):
     """Response genérico para DELETE que devuelve cantidad eliminada."""
 

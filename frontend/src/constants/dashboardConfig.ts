@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { FileQuestion, Mic, MessageSquare, Video } from "lucide-react";
+import { FileQuestion, Mic, MessageSquare } from "lucide-react";
 import { dictionaries } from "@/locales";
 
 const tCards = dictionaries.mainContent.contentCards;
@@ -15,7 +15,6 @@ export type ContentCard = {
 };
 
 export const contentCards: ContentCard[] = [
-  { title: tCards.videoPills, count: 3, icon: Video as DashboardIcon },
   { title: tCards.podcasts, count: 5, icon: Mic as DashboardIcon },
   { title: tCards.summaries, count: 12, icon: MessageSquare as DashboardIcon },
   { title: tCards.exams, count: 8, icon: FileQuestion as DashboardIcon },

@@ -71,7 +71,7 @@ class UserMemoryManager:
         if max_tokens not in self._llm_cache:
             credentials, project_id = get_credentials_and_project()
             if not project_id:
-                api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+                api_key = os.getenv("GOOGLE_API_KEY")
                 if not api_key:
                     return None
                 flash = gemini_flash_model_id()

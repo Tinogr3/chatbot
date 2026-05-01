@@ -120,7 +120,7 @@ def extract_text(content: Any) -> str:
 def get_gemini_vision_model(max_tokens: int = 65535) -> Optional[ChatGoogleGenerativeAI]:
     try:
         vision_model = gemini_flash_model_id()
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        api_key = os.getenv("GOOGLE_API_KEY")
         if api_key:
             return ChatGoogleGenerativeAI(
                 model=vision_model,
@@ -227,7 +227,7 @@ def get_embeddings() -> Optional[GoogleGenerativeAIEmbeddings]:
     try:
         credentials, project_id = get_credentials_and_project()
         if not project_id:
-            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+            api_key = os.getenv("GOOGLE_API_KEY")
             if api_key:
                 _embeddings_cache = GoogleGenerativeAIEmbeddings(model="text-embedding-004", api_key=api_key)
                 return _embeddings_cache
@@ -279,7 +279,7 @@ Texto del documento:
 {truncated_text}
 ---"""
     try:
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        api_key = os.getenv("GOOGLE_API_KEY")
         flash_model = gemini_flash_model_id()
         if api_key:
             llm = ChatGoogleGenerativeAI(model=flash_model, google_api_key=api_key, temperature=0)
@@ -375,7 +375,7 @@ def extract_document_competencies(text: str) -> Optional["ExtractedCompetencyTre
         f"TEXTO DEL DOCUMENTO:\n---\n{truncated}\n---"
     )
     try:
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        api_key = os.getenv("GOOGLE_API_KEY")
         flash_model = gemini_flash_model_id()
         if api_key:
             llm = ChatGoogleGenerativeAI(
@@ -802,7 +802,7 @@ def initialize_agent(
     if vector_store is None:
         return None
     try:
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        api_key = os.getenv("GOOGLE_API_KEY")
         pro_model = gemini_pro_model_id()
         if api_key:
             llm = ChatGoogleGenerativeAI(

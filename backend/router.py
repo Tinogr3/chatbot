@@ -31,13 +31,14 @@ class QueryCategory(Enum):
     CONVERSACION = "CONVERSACION"
     PREGUNTA_DOCUMENTO = "PREGUNTA_DOCUMENTO"
     RESUMEN = "RESUMEN"
+    EXAMEN = "EXAMEN"
     APRENDIZAJE = "APRENDIZAJE"
     OTRO = "OTRO"
 
 
 def get_model(temperature: float = 0.7, max_output_tokens: int = 65535) -> Optional[ChatGoogleGenerativeAI]:
     try:
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        api_key = os.getenv("GOOGLE_API_KEY")
         if api_key:
             return ChatGoogleGenerativeAI(
                 model=gemini_pro_model_id(),
@@ -70,14 +71,15 @@ CATEGORÍAS:
 - CONVERSACION: Saludos, despedidas, charla casual, preguntas personales al asistente, agradecimientos. Incluye cuando el usuario da información sobre sí mismo (ej: "me llamo X", "trabajo en Y", "soy de Z") o da instrucciones sobre cómo comportarse.
 - PREGUNTA_DOCUMENTO: Preguntas específicas que requieren buscar información en documentos
 - RESUMEN: Solicitudes de resumir, sintetizar o dar una visión general del contenido
-- APRENDIZAJE: El usuario quiere aprender, estudiar, practicar, hacer ejercicios o que le enseñen un tema
+- EXAMEN: Solicitudes de crear un examen, test, cuestionario, evaluación con preguntas o repasar con preguntas tipo examen sobre el material
+- APRENDIZAJE: El usuario quiere aprender con tutoría guiada, estudiar con el modo tutor, practicar de forma conversacional o que le enseñen paso a paso un tema (no un examen escrito de una vez)
 - OTRO: Cualquier otra cosa que no encaje en las anteriores
 
 CONSULTA DEL USUARIO:
 "{query}"
 
 INSTRUCCIONES:
-- Responde ÚNICAMENTE con una de estas palabras: CONVERSACION, PREGUNTA_DOCUMENTO, RESUMEN, APRENDIZAJE, OTRO
+- Responde ÚNICAMENTE con una de estas palabras: CONVERSACION, PREGUNTA_DOCUMENTO, RESUMEN, EXAMEN, APRENDIZAJE, OTRO
 - No agregues explicaciones ni texto adicional
 
 CATEGORÍA:"""
@@ -160,6 +162,49 @@ RESUMEN ESTRUCTURADO (sintetizando todo el contenido recibido):"""
     except Exception as e:
         logger.warning("Error generating summary: %s", e)
         return {"answer": f"Error generando resumen: {str(e)}", "source_documents": []}
+
+
+def get_exam_response(
+    query: str,
+    vector_store: Any,
+    session_id: Optional[str] = None,
+    max_tokens: int = 65535,
+) -> Dict[str, Any]:
+    """Genera un examen (preguntas con opciones y breve clave) a partir de los documentos."""
+    llm = get_model(temperature=0.35, max_output_tokens=max_tokens)
+    if not llm:
+        return {"answer": "No puedo generar el examen en este momento.", "source_documents": []}
+    retriever = vector_store.as_retriever(
+        search_type="mmr",
+        search_kwargs={"k": 150, "fetch_k": 450, "lambda_mult": 0.7},
+    )
+    try:
+        docs = retriever.invoke(query)
+        if not docs:
+            return {"answer": "No hay documentos disponibles para crear el examen.", "source_documents": []}
+        context_parts = [f"[{d.metadata.get('source', 'Desconocido')}]\n{d.page_content}" for d in docs]
+        context = "\n\n---\n\n".join(context_parts)
+        exam_prompt = f"""Eres un profesor que prepara un examen escrito en español a partir del material de referencia.
+
+CONTENIDO (fragmentos del material; pueden estar desordenados):
+{context}
+
+PETICIÓN DEL ESTUDIANTE:
+{query}
+
+INSTRUCCIONES:
+1. Crea entre 8 y 12 preguntas que cubran los temas principales del material.
+2. Mezcla preguntas de opción múltiple (4 opciones: A, B, C, D) y 2-3 preguntas de desarrollo breve.
+3. Para cada pregunta tipo test, indica cuál es la respuesta correcta al final de esa pregunta entre paréntesis, ej: (Respuesta correcta: B).
+4. No inventes datos que contradigan el material; si algo no aparece, omítelo o dilo explícitamente.
+5. Al final del examen, incluye una sección "Clave de respuestas" solo para las de opción múltiple.
+
+EXAMEN:"""
+        response = llm.invoke(exam_prompt)
+        return {"answer": extract_text(response.content).strip(), "source_documents": docs}
+    except Exception as e:
+        logger.warning("Error generating exam: %s", e)
+        return {"answer": f"Error generando examen: {str(e)}", "source_documents": []}
 
 
 class LearningFlowManager:

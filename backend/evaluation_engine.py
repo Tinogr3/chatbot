@@ -60,7 +60,7 @@ class EvaluationService:
 
     @staticmethod
     def _get_llm() -> ChatGoogleGenerativeAI:
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        api_key = os.getenv("GOOGLE_API_KEY")
         flash = gemini_flash_model_id()
         if api_key:
             return ChatGoogleGenerativeAI(
@@ -73,7 +73,7 @@ class EvaluationService:
         if not credentials or not project_id:
             raise RuntimeError(
                 "No hay credenciales de LLM disponibles. "
-                "Configura GOOGLE_API_KEY, VERTEX_AI_API_KEY o GOOGLE_APPLICATION_CREDENTIALS."
+                "Configura GOOGLE_API_KEY o GOOGLE_APPLICATION_CREDENTIALS."
             )
         return ChatGoogleGenerativeAI(
             model=flash,

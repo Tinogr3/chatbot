@@ -203,3 +203,48 @@ class UserCompetencyProgress(Base):
             f"<UserCompetencyProgress session={self.session_id!r} "
             f"subcompetency={self.subcompetency_id} score={self.score}>"
         )
+
+
+# ---------------------------------------------------------------------------
+# Discovery Hub (resúmenes y exámenes generados por chat)
+# ---------------------------------------------------------------------------
+
+
+class StoredSummary(Base):
+    """Resumen generado cuando el usuario pide un resumen al asistente."""
+
+    __tablename__ = "stored_summaries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (Index("ix_stored_summary_session_created", "session_id", "created_at"),)
+
+    def __repr__(self) -> str:
+        return f"<StoredSummary id={self.id} session={self.session_id!r}>"
+
+
+class StoredExam(Base):
+    """Examen generado cuando el usuario pide un examen o test sobre los documentos."""
+
+    __tablename__ = "stored_exams"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (Index("ix_stored_exam_session_created", "session_id", "created_at"),)
+
+    def __repr__(self) -> str:
+        return f"<StoredExam id={self.id} session={self.session_id!r}>"

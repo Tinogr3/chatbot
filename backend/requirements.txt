@@ -27,6 +27,7 @@ chromadb>=0.4.22
 
 # Google Cloud
 google-cloud-storage>=2.14.0
+gTTS>=2.5.0
 google-auth>=2.27.0
 
 # PDF
