@@ -33,8 +33,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Solo artefactos Python en la raíz del repo; no usar `lib/` suelto (ignoraría frontend/src/lib/).
+/lib/
+/lib64/
 parts/
 sdist/
 var/
