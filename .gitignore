@@ -61,3 +61,8 @@ Thumbs.db
 *.tmp
 *.temp
 
+# Node / Next (por si se generan fuera de frontend/)
+node_modules/
+.next/
+out/
+

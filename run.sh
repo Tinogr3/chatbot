@@ -1,25 +1,15 @@
 #!/usr/bin/env bash
 # Arranca backend (Uvicorn/FastAPI), frontend (Next.js) y worker (Celery) en background.
 # Al salir (Ctrl+C), se detienen absolutamente todos los subprocesos asociados.
+#
+# Preparación en frío (clone nuevo): crea venv si no existe e instala dependencias
+# Python (requirements.txt en la raíz) y npm en frontend/ antes de levantar servicios.
 
 set -euo pipefail
 IFS=$'\n\t'
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_ROOT"
-
-if [[ ! -d "venv" ]]; then
-  echo "No se encuentra venv. Crea uno con: python3 -m venv venv" >&2
-  exit 1
-fi
-
-source venv/bin/activate
-
-BACKEND_PORT="${BACKEND_PORT:-8000}"
-FRONTEND_PORT="${FRONTEND_PORT:-3000}"
-REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
-REDIS_PORT="${REDIS_PORT:-6379}"
-REDIS_AUTO_START="${REDIS_AUTO_START:-1}"
 
 free_port_if_in_use() {
   local port="$1"
@@ -91,11 +81,47 @@ EOF
   exit 1
 }
 
-install_backend_deps_if_needed() {
-  if ! python -c "import fastapi" 2>/dev/null; then
-    echo "Instalando dependencias del backend en venv..." >&2
-    pip install -q -r backend/requirements.txt
+ensure_venv() {
+  if [[ -d "venv" ]]; then
+    return 0
   fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "No se encontró python3. Instálalo para crear el entorno virtual." >&2
+    exit 1
+  fi
+  echo "Creando entorno virtual (venv) en ${PROJECT_ROOT}/venv ..." >&2
+  python3 -m venv venv
+}
+
+install_python_dependencies() {
+  if [[ ! -f "requirements.txt" ]]; then
+    echo "No se encuentra requirements.txt en la raíz del proyecto." >&2
+    exit 1
+  fi
+  echo "Instalando dependencias Python (venv)..." >&2
+  pip install -q --upgrade pip
+  pip install -q -r requirements.txt
+}
+
+install_frontend_dependencies() {
+  if [[ ! -f "frontend/package.json" ]]; then
+    echo "No se encuentra frontend/package.json." >&2
+    exit 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "No se encontró npm. Instala Node.js (recomendado: LTS) para el frontend." >&2
+    exit 1
+  fi
+  if [[ -d "frontend/node_modules" ]]; then
+    return 0
+  fi
+  echo "Instalando dependencias del frontend (npm ci)..." >&2
+  (cd frontend && npm ci)
+}
+
+install_project_dependencies() {
+  install_python_dependencies
+  install_frontend_dependencies
 }
 
 start_backend() {
@@ -120,11 +146,6 @@ start_celery_worker() {
 }
 
 start_frontend() {
-  if [[ ! -d "frontend/node_modules" ]]; then
-    echo "Instalando dependencias del frontend (npm install)..."
-    (cd frontend && npm install)
-  fi
-
   echo "Iniciando frontend en http://localhost:${FRONTEND_PORT} ..."
   cd frontend
   PORT="$FRONTEND_PORT" npm run dev &
@@ -185,10 +206,21 @@ trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
 trap 'cleanup' EXIT
 
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+REDIS_AUTO_START="${REDIS_AUTO_START:-1}"
+
+ensure_venv
+# shellcheck source=/dev/null
+source venv/bin/activate
+
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 
+install_project_dependencies
+
 ensure_redis_running
-install_backend_deps_if_needed
 
 free_port_if_in_use "$BACKEND_PORT"
 free_port_if_in_use "$FRONTEND_PORT"
