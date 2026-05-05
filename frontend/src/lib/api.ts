@@ -341,23 +341,23 @@ export async function getDiscoveryExams(sessionId: string): Promise<DiscoveryIte
  */
 export async function createPodcastAudio(
   sessionId: string,
-  summaryIds?: number[]
+  summaryIds?: number[],
+  options?: { signal?: AbortSignal }
 ): Promise<Blob> {
-  const headers: HeadersInit = {
-    ...sessionHeaders(sessionId),
-  };
+  const headers = new Headers(sessionHeaders(sessionId));
   let body: string | undefined;
   if (summaryIds !== undefined) {
     if (summaryIds.length === 0) {
       throw new Error("Selecciona al menos un resumen para el podcast.");
     }
-    headers["Content-Type"] = "application/json";
+    headers.set("Content-Type", "application/json");
     body = JSON.stringify({ summary_ids: summaryIds });
   }
   const res = await fetch(`${BACKEND_URL}/discovery/podcast-audio`, {
     method: "POST",
     headers,
     body,
+    signal: options?.signal,
   });
   if (!res.ok) {
     const message = await parseErrorResponse(res);

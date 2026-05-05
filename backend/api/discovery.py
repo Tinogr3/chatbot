@@ -28,6 +28,8 @@ logger = get_logger("api.discovery")
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
 _MAX_TTS_CHARS = 12_000
+# gTTS puede tardar mucho con textos largos o red lenta; evita peticiones colgadas indefinidamente.
+_TTS_TIMEOUT_SEC = 240.0
 
 
 def _normalize_session(x_session_id: Optional[str]) -> str:
@@ -149,7 +151,13 @@ async def create_podcast_audio(
     if len(text.strip()) < 20:
         raise HTTPException(status_code=400, detail="El texto para audio es demasiado corto.")
     try:
-        mp3 = await _synthesize_mp3_es(text)
+        mp3 = await asyncio.wait_for(_synthesize_mp3_es(text), timeout=_TTS_TIMEOUT_SEC)
+    except asyncio.TimeoutError:
+        logger.warning("TTS podcast: tiempo de espera agotado (%ss)", _TTS_TIMEOUT_SEC)
+        raise HTTPException(
+            status_code=504,
+            detail="La generación de audio tardó demasiado. Prueba con menos resúmenes o comprueba la red.",
+        ) from None
     except Exception as e:
         logger.warning("Fallo TTS podcast: %s", e)
         raise HTTPException(

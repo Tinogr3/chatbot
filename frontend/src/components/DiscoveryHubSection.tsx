@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileQuestion, MessageSquare, Mic, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { useProjects } from "@/context/ProjectsContext";
@@ -83,6 +83,7 @@ export default function DiscoveryHubSection() {
   const [podcastPickLoading, setPodcastPickLoading] = useState(false);
   const [podcastPickList, setPodcastPickList] = useState<DiscoveryItem[]>([]);
   const [selectedForPodcast, setSelectedForPodcast] = useState<Set<number>>(() => new Set());
+  const audioAbortRef = useRef<AbortController | null>(null);
 
   const refreshStats = useCallback(async () => {
     if (!effectiveSessionId) return;
@@ -112,6 +113,12 @@ export default function DiscoveryHubSection() {
     };
   }, [audioBlobUrl]);
 
+  useEffect(() => {
+    return () => {
+      audioAbortRef.current?.abort();
+    };
+  }, []);
+
   const openSummaries = async () => {
     if (!effectiveSessionId) return;
     setSummariesOpen(true);
@@ -140,6 +147,10 @@ export default function DiscoveryHubSection() {
 
   const openPodcastPicker = async () => {
     if (!effectiveSessionId || stats.summaries === 0) return;
+    if (audioLoading) {
+      setPodcastModalOpen(true);
+      return;
+    }
     setPodcastModalOpen(true);
     setPodcastPickLoading(true);
     setAudioError(null);
@@ -190,11 +201,18 @@ export default function DiscoveryHubSection() {
       if (prev) URL.revokeObjectURL(prev);
       return null;
     });
+    audioAbortRef.current?.abort();
+    const ac = new AbortController();
+    audioAbortRef.current = ac;
     try {
-      const blob = await createPodcastAudio(effectiveSessionId, ids);
+      const blob = await createPodcastAudio(effectiveSessionId, ids, { signal: ac.signal });
       setAudioBlobUrl(URL.createObjectURL(blob));
       setPodcastModalOpen(false);
     } catch (e) {
+      const aborted =
+        (e instanceof DOMException && e.name === "AbortError") ||
+        (e instanceof Error && e.name === "AbortError");
+      if (aborted) return;
       setAudioError(e instanceof Error ? e.message : d.audioError);
     } finally {
       setAudioLoading(false);
@@ -202,7 +220,7 @@ export default function DiscoveryHubSection() {
   };
 
   const closePodcastModal = () => {
-    if (!audioLoading) setPodcastModalOpen(false);
+    setPodcastModalOpen(false);
   };
 
   if (!effectiveSessionId) return null;
@@ -227,12 +245,15 @@ export default function DiscoveryHubSection() {
           </p>
           <button
             type="button"
-            onClick={openPodcastPicker}
-            disabled={audioLoading || stats.summaries === 0}
+            onClick={() => void openPodcastPicker()}
+            disabled={stats.summaries === 0}
             className={btnPrimary}
           >
             {audioLoading ? d.audioLoading : d.createAudio}
           </button>
+          {audioLoading && !podcastModalOpen && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">{d.podcastCloseWhileGeneratingHint}</p>
+          )}
           {audioError && <p className="text-xs text-red-600 dark:text-red-400">{audioError}</p>}
           {audioBlobUrl && (
             <audio src={audioBlobUrl} controls className="w-full mt-1" preload="metadata" />
@@ -308,12 +329,14 @@ export default function DiscoveryHubSection() {
               ))}
             </ul>
           )}
+          {audioLoading && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-4">{d.podcastCloseWhileGeneratingHint}</p>
+          )}
           <div className="flex flex-col sm:flex-row gap-2 mt-6 pt-4 border-t border-gray-100 dark:border-gray-800">
             <button
               type="button"
               onClick={closePodcastModal}
-              disabled={audioLoading}
-              className="sm:flex-1 text-center text-sm font-medium py-2.5 px-3 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-60"
+              className="sm:flex-1 text-center text-sm font-medium py-2.5 px-3 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               {d.podcastCancel}
             </button>

@@ -171,6 +171,8 @@ export const dictionaries = {
       podcastLoadingSummaries: "Cargando resúmenes…",
       podcastCancel: "Cancelar",
       podcastListError: "No se pudieron cargar los resúmenes.",
+      podcastCloseWhileGeneratingHint:
+        "Puedes cerrar este cuadro y seguir usando la app: cuando el audio esté listo verás el reproductor en esta tarjeta.",
     },
   },
 
