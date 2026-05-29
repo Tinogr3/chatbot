@@ -15,7 +15,7 @@ from database import get_db
 from document_registry import load_document_registry
 from logger import get_logger
 from models import Competency, LearningOutcome, Subcompetency
-from rag_engine import extract_text, initialize_agent, initialize_vector_store_async
+from rag_engine import initialize_agent, initialize_vector_store_async
 from router import (
     QueryCategory,
     LearningFlowManager,
@@ -25,6 +25,7 @@ from router import (
     route_query,
 )
 from schemas import ChatRequest, ChatResponse
+from session_ids import normalize_session_id
 from user_memory import UserMemoryManager
 
 logger = get_logger("api.chat")
@@ -150,7 +151,7 @@ async def chat(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
-    session_id = (body.session_id or x_session_id or "").strip().lower().replace(" ", "_")
+    session_id = normalize_session_id(body.session_id or x_session_id)
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id requerido (header X-Session-Id o body)")
     prompt = (body.message or "").strip()
@@ -222,12 +223,11 @@ async def chat(
                     learning_topic,
                     exc,
                 )
-            except Exception as exc:  # pragma: no cover - red de seguridad
+            except Exception:  # pragma: no cover
                 logger.exception(
                     "Error inesperado registrando progreso (session=%s).",
                     session_id,
                 )
-                _ = exc  # silencia linters sobre variable no usada
     # Modo aprendizaje activado pero sin tema: el mensaje actual es el tema (iniciar sesión)
     elif learning_mode and not (learning_topic or "").strip():
         vector_store = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)

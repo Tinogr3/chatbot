@@ -1,24 +1,20 @@
-"""
-Worker Celery - Procesamiento asíncrono de videos (YouTube/Whisper) y PDFs.
-Broker y backend: Redis. Ejecutar: celery -A worker worker --loglevel=info
-"""
-import logging
 import os
 import sys
 import tempfile
 import base64
 from typing import Any, Dict, List, Optional
 
-# Asegurar path del backend
-if __name__ == "__main__" or os.path.basename(os.getcwd()) != "backend":
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    if backend_dir not in sys.path:
-        sys.path.insert(0, backend_dir)
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+# Asegura imports "planos" (ej. `from session_ids import ...`) dentro de Celery,
+# independientemente del `cwd` con el que arranque el worker.
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from celery import Celery
 from celery.result import AsyncResult
 
-# Configuración desde entorno (por defecto Redis local)
+from logger import get_logger
+
 REDIS_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 
 app = Celery(
@@ -36,7 +32,7 @@ app.conf.update(
     enable_utc=True,
 )
 
-logger = logging.getLogger("worker")
+logger = get_logger("worker")
 
 
 @app.task(bind=True, name="worker.process_video_task")
@@ -45,9 +41,6 @@ def process_video_task(
     url: str,
     session_id: str,
 ) -> Dict[str, Any]:
-    """
-    Tarea asíncrona: descarga/transcribe video YouTube y añade documentos al vector store.
-    """
     from session_ids import normalize_session_id
 
     session_id = normalize_session_id(session_id)
@@ -55,7 +48,6 @@ def process_video_task(
     try:
         self.update_state(state="PROGRESS", meta={"progress": 0.05, "message": "Iniciando procesamiento del video..."})
         from api.chat import invalidate_agent_cache
-        from document_registry import load_document_registry, save_document_registry
         from exceptions import VideoTranscriptionError
         from media_processor import extract_video_id, process_video as do_process_video
         from rag_engine import initialize_vector_store

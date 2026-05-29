@@ -34,6 +34,7 @@ from evaluation_engine import EvaluationService
 from logger import get_logger
 from models import LearningEvidence, LearningOutcome, UserCompetencyProgress
 from schemas import EvaluateLearningRequest, EvaluateLearningResponse
+from session_ids import normalize_session_id
 
 logger = get_logger("api.evaluation")
 
@@ -207,7 +208,7 @@ async def evaluate(
       * 502 si el LLM evaluador no está disponible (credenciales/red).
       * 500 ante errores inesperados de BD o evaluación.
     """
-    session_id = body.session_id.strip().lower().replace(" ", "_")
+    session_id = normalize_session_id(body.session_id)
     if not session_id:
         raise HTTPException(
             status_code=400,

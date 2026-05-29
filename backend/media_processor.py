@@ -1,6 +1,3 @@
-"""
-MediaProcessor - Procesamiento de contenido multimedia (backend).
-"""
 import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
@@ -112,7 +109,6 @@ def generate_transcript_with_whisper(video_id: str) -> Tuple[List[Dict[str, Any]
 def process_video(
     url: str,
     chunk_size: int = 1000,
-    chunk_overlap: int = 200,
     languages: Optional[List[str]] = None,
 ) -> List[Document]:
     if languages is None:
@@ -147,20 +143,6 @@ def process_video(
             metadata={'source': url, 'video_id': video_id, 'type': 'video', 'timestamp': current_start_time, 'language': language}
         ))
     return documents
-
-
-def format_timestamp(seconds: float) -> str:
-    seconds = int(seconds)
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    secs = seconds % 60
-    if hours > 0:
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-    return f"{minutes:02d}:{secs:02d}"
-
-
-def get_youtube_embed_url(video_id: str, start_time: float = 0) -> str:
-    return f"https://www.youtube.com/watch?v={video_id}&t={int(start_time)}s"
 
 
 def is_youtube_url(url: str) -> bool:

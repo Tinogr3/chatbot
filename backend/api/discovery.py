@@ -22,6 +22,7 @@ from discovery_repo import (
 from logger import get_logger
 from models import StoredSummary
 from schemas import DiscoveryItemOut, DiscoveryStatsOut, PodcastAudioRequest
+from session_ids import normalize_session_id
 
 logger = get_logger("api.discovery")
 
@@ -32,8 +33,8 @@ _MAX_TTS_CHARS = 12_000
 _TTS_TIMEOUT_SEC = 240.0
 
 
-def _normalize_session(x_session_id: Optional[str]) -> str:
-    sid = (x_session_id or "").strip().lower().replace(" ", "_")
+def _require_session_id(x_session_id: Optional[str]) -> str:
+    sid = normalize_session_id(x_session_id)
     if not sid:
         raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
     return sid
@@ -75,7 +76,7 @@ async def discovery_stats(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
     db: AsyncSession = Depends(get_db),
 ) -> DiscoveryStatsOut:
-    session_id = _normalize_session(x_session_id)
+    session_id = _require_session_id(x_session_id)
     summaries_n = await count_summaries(db, session_id)
     exams_n = await count_exams(db, session_id)
     return DiscoveryStatsOut(summaries=summaries_n, exams=exams_n)
@@ -86,7 +87,7 @@ async def get_summaries(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
     db: AsyncSession = Depends(get_db),
 ) -> list[DiscoveryItemOut]:
-    session_id = _normalize_session(x_session_id)
+    session_id = _require_session_id(x_session_id)
     rows = await list_summaries(db, session_id)
     return [
         DiscoveryItemOut(
@@ -104,7 +105,7 @@ async def get_exams(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
     db: AsyncSession = Depends(get_db),
 ) -> list[DiscoveryItemOut]:
-    session_id = _normalize_session(x_session_id)
+    session_id = _require_session_id(x_session_id)
     rows = await list_exams(db, session_id)
     return [
         DiscoveryItemOut(
@@ -128,7 +129,7 @@ async def create_podcast_audio(
     Si el cuerpo incluye ``summary_ids``, solo esos resúmenes (en ese orden);
     si no se envía cuerpo o ``summary_ids`` es null, se usan todos los de la sesión.
     """
-    session_id = _normalize_session(x_session_id)
+    session_id = _require_session_id(x_session_id)
     rows: list[StoredSummary]
     if body.summary_ids is None:
         rows = await list_summaries(db, session_id)

@@ -1,17 +1,12 @@
-"""
-Endpoints de subida de PDFs - POST /upload (asíncrono), POST /upload/load_cloud
-"""
 import asyncio
 import base64
 from typing import Optional
 
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 
-from logger import get_logger
 from schemas import TaskEnqueuedResponse
 from session_ids import normalize_session_id
 
-logger = get_logger("api.upload")
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 

@@ -1,5 +1,5 @@
 """
-Endpoints de sesión - POST /clear_session
+Endpoints de sesión - POST /session/clear
 """
 import os
 import shutil
@@ -16,6 +16,7 @@ from document_registry import clear_document_registry
 from logger import get_logger
 from rag_engine import _chroma_persist_directory
 from schemas import ClearSessionResponse
+from session_ids import normalize_session_id
 
 logger = get_logger("api.session")
 router = APIRouter(prefix="/session", tags=["session"])
@@ -27,7 +28,7 @@ async def clear_session(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
     db: AsyncSession = Depends(get_db),
 ) -> ClearSessionResponse:
-    session_id = (x_session_id or "").strip().lower().replace(" ", "_")
+    session_id = normalize_session_id(x_session_id)
     if not session_id:
         raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
 

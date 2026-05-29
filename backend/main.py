@@ -1,33 +1,25 @@
-"""
-API FastAPI - Backend del Chatbot RAG Educativo.
-Ejecutar: uvicorn main:app --reload --host 0.0.0.0 --port 8000
-"""
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from typing import Annotated, Any, Dict
+from typing import Dict
 
-# Asegurar que el directorio backend esté en el path al ejecutar desde raíz del proyecto
-if __name__ == "__main__" or os.path.basename(os.getcwd()) != "backend":
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    if backend_dir not in sys.path:
-        sys.path.insert(0, backend_dir)
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+# Garantiza imports planos (p. ej. `from session_ids import ...`)
+# independientemente del cwd con el que Uvicorn arranque.
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
-# Cargar .env desde la raíz del proyecto (para GOOGLE_APPLICATION_CREDENTIALS, BUCKET_NAME, etc.)
-try:
-    from dotenv import load_dotenv
-    _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    _env_path = os.path.join(_project_root, ".env")
-    if os.path.isfile(_env_path):
-        load_dotenv(_env_path)
-except Exception:
-    pass
+from dotenv import load_dotenv
 
-from fastapi import Depends, FastAPI
+_env_path = os.path.join(os.path.dirname(backend_dir), ".env")
+if os.path.isfile(_env_path):
+    load_dotenv(_env_path)
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import HttpSettings, get_http_settings
+from config import get_http_settings
 from logger import setup_logging
 from rag_engine import set_rag_thread_pool
 from api.chat import router as chat_router
@@ -41,9 +33,6 @@ from api.evaluation import router as evaluation_router
 from api.dashboard import router as dashboard_router
 from api.discovery import router as discovery_router
 
-# Misma configuración HTTP en rutas: `settings: HttpSettingsDep`
-HttpSettingsDep = Annotated[HttpSettings, Depends(get_http_settings)]
-
 setup_logging()
 
 _http = get_http_settings()
@@ -51,7 +40,6 @@ _http = get_http_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Pool dedicado para operaciones RAG pesadas (Chroma, PDF) sin bloquear el event loop."""
     from database import init_db
     await init_db()
 
@@ -92,7 +80,6 @@ app.include_router(discovery_router)
 
 @app.get("/health")
 def health() -> Dict[str, str]:
-    """Health check del API."""
     return {"status": "ok"}
 
 
