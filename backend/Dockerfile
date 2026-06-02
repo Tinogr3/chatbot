@@ -35,7 +35,11 @@ RUN pip install --no-cache-dir \
     asyncpg>=0.29.0 \
     psycopg2-binary>=2.9.0 \
     celery[redis]>=5.3.0 \
-    redis>=5.0.0
+    redis>=5.0.0 \
+    python-jose[cryptography]>=3.3.0 \
+    passlib[bcrypt]>=1.7.4 \
+    bcrypt==4.0.1 \
+    slowapi>=0.1.9
 
 # ── Capa 2: LangChain y Google Cloud (actualizaciones frecuentes) ─────────────
 RUN pip install --no-cache-dir \

@@ -1,5 +1,11 @@
 # Backend API - Chatbot RAG Educativo
 fastapi>=0.109.0
+
+# Autenticación
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt==4.0.1
+slowapi>=0.1.9
 aiosqlite>=0.20.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.6

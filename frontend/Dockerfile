@@ -1,8 +1,13 @@
 # ── Etapa 1: builder ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 
+# NEXT_PUBLIC_* se incrusta en el bundle en tiempo de compilación.
+# Debe llegar como ARG para que npm run build lo recoja.
+ARG NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+
 ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    NEXT_PUBLIC_BACKEND_URL=$NEXT_PUBLIC_BACKEND_URL
 
 WORKDIR /app
 

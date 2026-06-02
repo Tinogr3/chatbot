@@ -22,10 +22,44 @@ export const dictionaries = {
     userContextOutsideProvider: "useUser debe usarse dentro de UserProvider.",
     projectsContextOutsideProvider:
       "useProjects debe usarse dentro de ProjectsProvider.",
+    authContextOutsideProvider: "useAuth debe usarse dentro de AuthProvider.",
   },
 
   user: {
     defaultUsername: "Usuario",
+  },
+
+  authScreen: {
+    login: {
+      title: "Iniciar sesión",
+      subtitle: "Introduce tus credenciales para acceder a COTUTOR IA.",
+      formAriaLabel: "Formulario de inicio de sesión",
+      usernamePlaceholder: "Nombre de usuario",
+      usernameLabel: "Nombre de usuario",
+      passwordPlaceholder: "Contraseña",
+      passwordLabel: "Contraseña",
+      submitButton: "Entrar",
+      submitAriaLabel: "Iniciar sesión con las credenciales introducidas",
+      registerLink: "¿No tienes cuenta? Crear cuenta",
+      forgotHint: "Contacta con tu administrador si has olvidado tu contraseña.",
+    },
+    register: {
+      title: "Crear cuenta",
+      subtitle: "Crea tu cuenta para acceder a COTUTOR IA.",
+      formAriaLabel: "Formulario de registro",
+      usernamePlaceholder: "Nombre de usuario · Ej: juan_garcia",
+      usernameLabel: "Nombre de usuario",
+      passwordPlaceholder: "Contraseña · Ej: MiClave_7",
+      passwordLabel: "Contraseña",
+      confirmPasswordPlaceholder: "Repite la contraseña",
+      confirmPasswordLabel: "Confirmar contraseña",
+      submitButton: "Crear cuenta",
+      submitAriaLabel: "Crear nueva cuenta con los datos introducidos",
+      loginLink: "¿Ya tienes cuenta? Iniciar sesión",
+      passwordMismatch: "Las contraseñas no coinciden. Asegúrate de escribir exactamente lo mismo en los dos campos.",
+      usernameHint: "Solo minúsculas, números, guion (-) o guion bajo (_). Ej: juan_garcia",
+      passwordHint: "Mínimo 8 caracteres con mayúscula, minúscula, dígito y símbolo. Ej: MiClave_7",
+    },
   },
 
   welcomeScreen: {
@@ -76,13 +110,10 @@ export const dictionaries = {
       buttonLabel: "Configuración",
       clearSession: "Limpiar sesión",
       clearSessionLoading: "Limpiando...",
-      forgetData: "Olvidar datos sobre mí",
-      forgetDataLoading: "Eliminando...",
       clearSessionSuccess: "Sesión limpiada correctamente.",
       clearSessionError: "Error al limpiar sesión.",
-      forgetDataSuccess: (count: number) =>
-        `Se eliminaron ${count} datos sobre ti.`,
-      forgetDataError: "Error al eliminar datos.",
+      logout: "Cerrar sesión",
+      logoutLoading: "Cerrando sesión...",
       confirmClear: {
         title: "Limpiar sesión",
         description:

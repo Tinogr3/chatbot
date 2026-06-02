@@ -38,11 +38,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import get_validated_session
 from database import get_db
 from document_registry import load_document_registry
 from logger import get_logger
 from models import Competency, Subcompetency, UserCompetencyProgress
-from session_ids import normalize_session_id
 
 from schemas import (
     DashboardCompetencyItem,
@@ -107,7 +107,7 @@ def _merge_document_filenames(
     summary="Puntuación promedio por competencia para los documentos del proyecto",
 )
 async def get_dashboard_competencies(
-    x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    session_id: str = Depends(get_validated_session),
     x_project_document_keys: Optional[str] = Header(
         None,
         alias="X-Project-Document-Keys",
@@ -127,13 +127,6 @@ async def get_dashboard_competencies(
     LEFT-JOIN-ea con la subcompetencia. `COALESCE(AVG(score), 0)` produce 0
     para las competencias todavía sin evaluar.
     """
-    session_id = normalize_session_id(x_session_id)
-    if not session_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Header X-Session-Id requerido",
-        )
-
     registry_keys = list(load_document_registry(session_id).keys())
     header_keys = _parse_project_document_keys_header(x_project_document_keys)
     document_filenames = _merge_document_filenames(registry_keys, header_keys)

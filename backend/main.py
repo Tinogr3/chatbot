@@ -16,12 +16,18 @@ _env_path = os.path.join(os.path.dirname(backend_dir), ".env")
 if os.path.isfile(_env_path):
     load_dotenv(_env_path)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from config import get_http_settings
 from logger import setup_logging
 from rag_engine import set_rag_thread_pool
+from api.auth import router as auth_router
 from api.chat import router as chat_router
 from api.upload import router as upload_router
 from api.video import router as video_router
@@ -32,6 +38,8 @@ from api.tasks import router as tasks_router
 from api.evaluation import router as evaluation_router
 from api.dashboard import router as dashboard_router
 from api.discovery import router as discovery_router
+
+limiter = Limiter(key_func=get_remote_address)
 
 setup_logging()
 
@@ -58,6 +66,31 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Convierte los errores de validación de Pydantic en mensajes legibles."""
+    messages: list[str] = []
+    for error in exc.errors():
+        field = " → ".join(str(loc) for loc in error.get("loc", []) if loc != "body")
+        msg = error.get("msg", "Valor inválido")
+        # Limpiar el prefijo genérico "Value error, " que añade Pydantic
+        msg = msg.removeprefix("Value error, ")
+        if field:
+            messages.append(f"{field}: {msg}")
+        else:
+            messages.append(msg)
+    detail = " | ".join(messages) if messages else "Datos de entrada inválidos."
+    return JSONResponse(
+        status_code=422,
+        content={"detail": detail},
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(_http.allowed_origins),
@@ -66,6 +99,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(upload_router)
 app.include_router(video_router)

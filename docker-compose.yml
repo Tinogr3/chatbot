@@ -82,6 +82,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* se incrusta en el bundle; debe pasarse como build arg.
+        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8000}
     ports:
       - "3000:3000"
     env_file: ${COMPOSE_ENV_FILE:-.env}

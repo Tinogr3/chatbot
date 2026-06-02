@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { chat as apiChat, getHistory } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { dispatchProgressUpdated } from "@/lib/progressEvents";
 
 export type ChatMessage = {
@@ -34,6 +35,7 @@ function mapHistoryToMessages(
 
 export function useChat(options: UseChatOptions = {}) {
   const { sessionId, onError } = options;
+  const { accessToken } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -51,7 +53,7 @@ export function useChat(options: UseChatOptions = {}) {
       return;
     }
 
-    getHistory(sessionId)
+    getHistory(sessionId, accessToken)
       .then((res) => {
         if (cancelled) return;
         setMessages(mapHistoryToMessages(res.messages));
@@ -65,7 +67,7 @@ export function useChat(options: UseChatOptions = {}) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, accessToken]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -82,7 +84,7 @@ export function useChat(options: UseChatOptions = {}) {
       setError(null);
 
       try {
-        const data = await apiChat(trimmed, sessionId, { learning_mode: isLearningMode });
+        const data = await apiChat(trimmed, sessionId, { learning_mode: isLearningMode }, accessToken);
         const assistantMessage: ChatMessage = {
           id: `assistant-${Date.now()}`,
           role: "assistant",
@@ -105,7 +107,7 @@ export function useChat(options: UseChatOptions = {}) {
         setIsLoading(false);
       }
     },
-    [sessionId, isLoading, isLearningMode, onError],
+    [sessionId, isLoading, isLearningMode, onError, accessToken],
   );
 
   const clearMessages = useCallback(() => {

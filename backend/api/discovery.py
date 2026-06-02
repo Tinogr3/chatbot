@@ -7,10 +7,11 @@ import asyncio
 import io
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import get_validated_session
 from database import get_db
 from discovery_repo import (
     count_exams,
@@ -22,7 +23,6 @@ from discovery_repo import (
 from logger import get_logger
 from models import StoredSummary
 from schemas import DiscoveryItemOut, DiscoveryStatsOut, PodcastAudioRequest
-from session_ids import normalize_session_id
 
 logger = get_logger("api.discovery")
 
@@ -31,13 +31,6 @@ router = APIRouter(prefix="/discovery", tags=["discovery"])
 _MAX_TTS_CHARS = 12_000
 # gTTS puede tardar mucho con textos largos o red lenta; evita peticiones colgadas indefinidamente.
 _TTS_TIMEOUT_SEC = 240.0
-
-
-def _require_session_id(x_session_id: Optional[str]) -> str:
-    sid = normalize_session_id(x_session_id)
-    if not sid:
-        raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
-    return sid
 
 
 def _summaries_to_speech_text(rows: list[StoredSummary], *, oldest_first: bool = True) -> str:
@@ -73,10 +66,9 @@ async def _synthesize_mp3_es(text: str) -> bytes:
 
 @router.get("/stats", response_model=DiscoveryStatsOut)
 async def discovery_stats(
-    x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    session_id: str = Depends(get_validated_session),
     db: AsyncSession = Depends(get_db),
 ) -> DiscoveryStatsOut:
-    session_id = _require_session_id(x_session_id)
     summaries_n = await count_summaries(db, session_id)
     exams_n = await count_exams(db, session_id)
     return DiscoveryStatsOut(summaries=summaries_n, exams=exams_n)
@@ -84,10 +76,9 @@ async def discovery_stats(
 
 @router.get("/summaries", response_model=list[DiscoveryItemOut])
 async def get_summaries(
-    x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    session_id: str = Depends(get_validated_session),
     db: AsyncSession = Depends(get_db),
 ) -> list[DiscoveryItemOut]:
-    session_id = _require_session_id(x_session_id)
     rows = await list_summaries(db, session_id)
     return [
         DiscoveryItemOut(
@@ -102,10 +93,9 @@ async def get_summaries(
 
 @router.get("/exams", response_model=list[DiscoveryItemOut])
 async def get_exams(
-    x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    session_id: str = Depends(get_validated_session),
     db: AsyncSession = Depends(get_db),
 ) -> list[DiscoveryItemOut]:
-    session_id = _require_session_id(x_session_id)
     rows = await list_exams(db, session_id)
     return [
         DiscoveryItemOut(
@@ -120,7 +110,7 @@ async def get_exams(
 
 @router.post("/podcast-audio")
 async def create_podcast_audio(
-    x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    session_id: str = Depends(get_validated_session),
     body: PodcastAudioRequest = Body(default_factory=PodcastAudioRequest),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
@@ -129,7 +119,6 @@ async def create_podcast_audio(
     Si el cuerpo incluye ``summary_ids``, solo esos resúmenes (en ese orden);
     si no se envía cuerpo o ``summary_ids`` es null, se usan todos los de la sesión.
     """
-    session_id = _require_session_id(x_session_id)
     rows: list[StoredSummary]
     if body.summary_ids is None:
         rows = await list_summaries(db, session_id)

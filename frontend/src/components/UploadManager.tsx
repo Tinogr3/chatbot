@@ -9,6 +9,7 @@ import {
   getTaskStatus,
   type TaskStatusResponse,
 } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { useProjects, type DocumentSource } from "@/context/ProjectsContext";
 import { dictionaries } from "@/locales";
 
@@ -63,6 +64,7 @@ function resolveDocumentsFromTask(
 }
 
 export default function UploadManager() {
+  const { accessToken } = useAuth();
   const { effectiveSessionId, addDocumentsToCurrent } = useProjects();
 
   const [activeTab, setActiveTab] = useState<TabId>("manual");
@@ -132,7 +134,7 @@ export default function UploadManager() {
     }
     setError(null);
     try {
-      const { task_id } = await uploadPdf(file, effectiveSessionId);
+      const { task_id } = await uploadPdf(file, effectiveSessionId, accessToken);
       setPendingTask({ kind: "manual", filename: file.name });
       setTaskId(task_id);
     } catch (e) {
@@ -147,7 +149,7 @@ export default function UploadManager() {
     setTaskId(null);
     setNubeLoading(true);
     try {
-      const { task_id } = await loadCloudPdfs(effectiveSessionId);
+      const { task_id } = await loadCloudPdfs(effectiveSessionId, accessToken);
       setPendingTask({ kind: "cloud" });
       setTaskId(task_id);
     } catch (e) {
@@ -166,7 +168,7 @@ export default function UploadManager() {
     }
     setError(null);
     try {
-      const { task_id } = await processVideo(url, effectiveSessionId);
+      const { task_id } = await processVideo(url, effectiveSessionId, accessToken);
       setPendingTask({ kind: "youtube", url });
       setTaskId(task_id);
     } catch (e) {

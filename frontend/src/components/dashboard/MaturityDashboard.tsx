@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useAuth } from "@/context/AuthContext";
 import { useProjects } from "@/context/ProjectsContext";
 import {
   getDashboardCompetencies,
@@ -130,6 +131,7 @@ export type MaturityDashboardProps = {
 };
 
 export default function MaturityDashboard({ documentsOverride }: MaturityDashboardProps) {
+  const { accessToken } = useAuth();
   const { effectiveSessionId, currentProject } = useProjects();
   const projectDocumentNames = useMemo(
     () => currentProject?.documents.map((d) => d.name).filter(Boolean) ?? [],
@@ -166,6 +168,7 @@ export default function MaturityDashboard({ documentsOverride }: MaturityDashboa
     getDashboardCompetencies(
       effectiveSessionId,
       projectDocumentNames.length > 0 ? projectDocumentNames : undefined,
+      accessToken,
     )
       .then((response) => {
         if (cancelled) return;

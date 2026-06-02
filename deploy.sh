@@ -44,9 +44,17 @@ fi
 # ── 3. Validar que no queden placeholders sin reemplazar ──────────────────────
 info "Validando $ENV_FILE..."
 
-PLACEHOLDERS=("CAMBIA_ESTO")
+# Cadenas que los usuarios deben cambiar al configurar su .env.
+PLACEHOLDERS=(
+  "CAMBIA_ESTO"
+  "cambia_esta_password"
+  "cambia_esto_con"
+  "tu-project-id"
+  "tu-api-key"
+  "tu-bucket-name"
+)
 for placeholder in "${PLACEHOLDERS[@]}"; do
-  # awk: ignora líneas de comentario y muestra número de línea + contenido de las que fallen
+  # Ignora líneas de comentario; muestra número y contenido de las que fallen.
   matches=$(awk -v p="$placeholder" '!/^\s*#/ && $0 ~ p {print NR": "$0}' "$ENV_FILE")
   if [[ -n "$matches" ]]; then
     error "El archivo $ENV_FILE contiene '$placeholder'. Reemplaza todos los valores antes de desplegar."
@@ -61,7 +69,11 @@ done
 # shellcheck disable=SC2046
 export $(grep -v '^\s*#' "$ENV_FILE" | grep -v '^\s*$' | xargs)
 
-REQUIRED_VARS=(POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB GOOGLE_API_KEY ALLOWED_ORIGINS)
+REQUIRED_VARS=(
+  POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
+  GOOGLE_API_KEY PROJECT_ID BUCKET_NAME
+  JWT_SECRET_KEY ALLOWED_ORIGINS
+)
 for var in "${REQUIRED_VARS[@]}"; do
   if [[ -z "${!var:-}" ]]; then
     error "La variable $var está vacía en $ENV_FILE."
@@ -76,11 +88,16 @@ if [[ -z "$GCP_CREDS" || ! -f "$GCP_CREDS" ]]; then
   exit 1
 fi
 
-# ── 5. Construir e iniciar contenedores ───────────────────────────────────────
+# ── 5. Preparar directorio de datos del backend ───────────────────────────────
+# El volumen bind-mount ./backend/data debe existir antes de docker compose up
+# para que Docker no lo cree como root y el contenedor pueda escribir en él.
+mkdir -p backend/data
+
+# ── 6. Construir e iniciar contenedores ───────────────────────────────────────
 info "Iniciando despliegue${BUILD_FLAG:+ (con build)}..."
 docker compose --env-file "$ENV_FILE" up $BUILD_FLAG -d
 
-# ── 6. Esperar a que los servicios críticos estén healthy ─────────────────────
+# ── 7. Esperar a que los servicios críticos estén healthy ─────────────────────
 wait_healthy() {
   local service="$1"
   local max_attempts="${2:-30}"
@@ -88,8 +105,14 @@ wait_healthy() {
 
   echo -n "  Esperando a $service"
   while [[ $attempt -lt $max_attempts ]]; do
-    status=$(docker compose ps --format json "$service" 2>/dev/null \
-      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('Health',''))" 2>/dev/null || echo "")
+    # docker inspect es más fiable que parsear el JSON de "docker compose ps",
+    # cuyo formato varía entre versiones de Docker Compose.
+    local cid
+    cid=$(docker compose ps -q "$service" 2>/dev/null | head -1)
+    local status=""
+    if [[ -n "$cid" ]]; then
+      status=$(docker inspect --format "{{if .State.Health}}{{.State.Health.Status}}{{end}}" "$cid" 2>/dev/null || echo "")
+    fi
 
     if [[ "$status" == "healthy" ]]; then
       echo " ✓"
@@ -111,14 +134,14 @@ wait_healthy "db"      30
 wait_healthy "redis"   15
 wait_healthy "backend" 40
 
-# ── 7. Migraciones / esquema ──────────────────────────────────────────────────
-# El backend ejecuta SQLAlchemy create_all() en el lifespan (init_db).
+# ── 8. Esquema de base de datos ───────────────────────────────────────────────
+# SQLAlchemy create_all() corre en el lifespan del backend (init_db).
 # Las tablas se crean automáticamente en el primer arranque si no existen.
 # Si en el futuro se añade Alembic, reemplaza este bloque por:
 #   docker compose --env-file "$ENV_FILE" exec backend alembic upgrade head
 info "Esquema de base de datos: gestionado por SQLAlchemy en el arranque del backend."
 
-# ── 8. Estado final ───────────────────────────────────────────────────────────
+# ── 9. Estado final ───────────────────────────────────────────────────────────
 info "Despliegue completado."
 echo ""
 docker compose ps

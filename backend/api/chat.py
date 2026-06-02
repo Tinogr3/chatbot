@@ -3,12 +3,13 @@ Endpoints de chat - POST /chat
 """
 from typing import Any, Iterable, List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.evaluation import record_learning_progress
+from auth import get_validated_session
 from chat_manager import ChatHistoryManager
 from discovery_repo import add_stored_exam, add_stored_summary
 from database import get_db
@@ -25,7 +26,6 @@ from router import (
     route_query,
 )
 from schemas import ChatRequest, ChatResponse
-from session_ids import normalize_session_id
 from user_memory import UserMemoryManager
 
 logger = get_logger("api.chat")
@@ -148,12 +148,9 @@ async def _find_learning_outcome_for_sources(
 @router.post("", response_model=ChatResponse)
 async def chat(
     body: ChatRequest,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    session_id: str = Depends(get_validated_session),
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
-    session_id = normalize_session_id(body.session_id or x_session_id)
-    if not session_id:
-        raise HTTPException(status_code=400, detail="session_id requerido (header X-Session-Id o body)")
     prompt = (body.message or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="message vacío")
