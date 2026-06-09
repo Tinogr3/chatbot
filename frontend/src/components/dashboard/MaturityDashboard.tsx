@@ -39,7 +39,8 @@ function scoreToPracticePercent(score: number): number {
   return Math.round(clamp01(score) * 100);
 }
 
-function formatDocumentTitle(documentId: string): string {
+function formatDocumentTitle(documentId: string, displayName?: string | null): string {
+  if (displayName && displayName.trim()) return displayName.trim();
   try {
     const base = documentId.split(/[/\\]/).pop() ?? documentId;
     return decodeURIComponent(base);
@@ -76,7 +77,7 @@ function CompetencyRow({ item }: { item: DashboardCompetencyItem }) {
 }
 
 function DocumentBlock({ block }: { block: DashboardDocumentCompetencies }) {
-  const title = formatDocumentTitle(block.document_id);
+  const title = formatDocumentTitle(block.document_id, block.display_name);
   return (
     <div className="rounded-xl border border-gray-100 bg-white p-4 dark:border-gray-700 dark:bg-gray-900/50">
       <h3 className="mb-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -133,8 +134,10 @@ export type MaturityDashboardProps = {
 export default function MaturityDashboard({ documentsOverride }: MaturityDashboardProps) {
   const { accessToken } = useAuth();
   const { effectiveSessionId, currentProject } = useProjects();
-  const projectDocumentNames = useMemo(
-    () => currentProject?.documents.map((d) => d.name).filter(Boolean) ?? [],
+  // Enviar docKey (no name) al backend: para YouTube es el video_id,
+  // para PDFs es el basename — coincide con la clave canónica del dashboard.
+  const projectDocumentKeys = useMemo(
+    () => currentProject?.documents.map((d) => d.docKey ?? d.name).filter(Boolean) ?? [],
     [currentProject?.documents],
   );
   const [fetched, setFetched] = useState<DashboardDocumentCompetencies[] | null>(null);
@@ -167,7 +170,7 @@ export default function MaturityDashboard({ documentsOverride }: MaturityDashboa
 
     getDashboardCompetencies(
       effectiveSessionId,
-      projectDocumentNames.length > 0 ? projectDocumentNames : undefined,
+      projectDocumentKeys.length > 0 ? projectDocumentKeys : undefined,
       accessToken,
     )
       .then((response) => {
@@ -188,7 +191,7 @@ export default function MaturityDashboard({ documentsOverride }: MaturityDashboa
     return () => {
       cancelled = true;
     };
-  }, [documentsOverride, effectiveSessionId, projectDocumentNames, refreshKey]);
+  }, [documentsOverride, effectiveSessionId, projectDocumentKeys, refreshKey]);
 
   const documents =
     documentsOverride !== undefined ? documentsOverride ?? [] : fetched ?? [];

@@ -36,22 +36,32 @@ def get_transcript_with_timestamps(
 ) -> Tuple[List[Dict[str, Any]], str]:
     if languages is None:
         languages = ["es", "en"]
+
+    ytt_api = YouTubeTranscriptApi()
+
+    # Intentar cada idioma individualmente
+    for lang in languages:
+        try:
+            fetched = ytt_api.fetch(video_id, languages=[lang])
+            raw = fetched.to_raw_data()
+            if raw:
+                return raw, lang
+        except Exception:
+            continue
+
+    # Intentar cualquier transcripción disponible (auto-generada o manual)
     try:
-        for lang in languages:
+        transcript_list = ytt_api.list(video_id)
+        for transcript in transcript_list:
             try:
-                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
-                if transcript:
-                    return transcript, lang
+                raw = transcript.fetch().to_raw_data()
+                if raw:
+                    return raw, transcript.language_code
             except Exception:
                 continue
-        try:
-            transcript = YouTubeTranscriptApi.get_transcript(video_id)
-            if transcript:
-                return transcript, "auto"
-        except Exception:
-            pass
     except Exception:
         pass
+
     return generate_transcript_with_whisper(video_id)
 
 
@@ -143,6 +153,25 @@ def process_video(
             metadata={'source': url, 'video_id': video_id, 'type': 'video', 'timestamp': current_start_time, 'language': language}
         ))
     return documents
+
+
+def get_video_title(video_id: str) -> Optional[str]:
+    """Devuelve el título del video sin descargarlo.
+
+    Intenta primero con yt-dlp (extract_info sin descarga). Si no está
+    disponible o falla, devuelve None y el caller usará la URL como fallback.
+    """
+    try:
+        import yt_dlp
+
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            title = (info or {}).get("title")
+            return str(title).strip() if title else None
+    except Exception:
+        return None
 
 
 def is_youtube_url(url: str) -> bool:

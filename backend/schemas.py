@@ -465,7 +465,7 @@ class ExtractedLearningOutcome(BaseModel):
 
     description: str = Field(
         ...,
-        min_length=24,
+        min_length=10,
         max_length=520,
         description=(
             "Redacta un único resultado observable: verbo de acción + objeto + "
@@ -487,19 +487,22 @@ class ExtractedSubcompetency(BaseModel):
 
     name: str = Field(
         ...,
-        min_length=10,
+        min_length=5,
         max_length=200,
         description=(
-            "Nombre corto y específico al contenido del PDF (procedimiento, norma, "
-            "herramienta o caso). Debe diferenciarse claramente de la competencia "
-            "principal y de la otra subcompetencia. Evita títulos genéricos."
+            "Nombre corto y específico al contenido del documento (procedimiento, norma, "
+            "herramienta, concepto clave o caso). Debe diferenciarse claramente de la "
+            "competencia principal y de las demás subcompetencias. Evita títulos genéricos."
         ),
     )
     learning_outcomes: List[ExtractedLearningOutcome] = Field(
         ...,
         min_length=1,
-        max_length=1,
-        description="Exactamente un resultado de aprendizaje evaluable para esta subcompetencia",
+        max_length=2,
+        description=(
+            "Entre 1 y 2 resultados de aprendizaje evaluables para esta subcompetencia: "
+            "uno de tipo conceptual/analítico y otro de tipo práctico/aplicado."
+        ),
     )
 
     @field_validator("name", mode="before")
@@ -515,19 +518,23 @@ class ExtractedCompetencyTree(BaseModel):
 
     competency_name: str = Field(
         ...,
-        min_length=10,
+        min_length=5,
         max_length=200,
         description=(
             "Competencia principal alineada al propósito del documento (no genérica). "
             "Debe nombrar el ámbito concreto (p. ej. normativa X, proceso Y, análisis Z). "
-            "Las dos subcompetencias deben ser facetas distintas de esta misma competencia."
+            "Las subcompetencias deben ser facetas distintas de esta misma competencia."
         ),
     )
     subcompetencies: List[ExtractedSubcompetency] = Field(
         ...,
-        min_length=2,
-        max_length=2,
-        description="Exactamente 2 subcompetencias: ortogonales entre sí y no redundantes",
+        min_length=1,
+        max_length=5,
+        description=(
+            "Entre 3 y 5 subcompetencias específicas y ortogonales entre sí, "
+            "cubriendo distintos aspectos del documento (conceptual, procedimental, "
+            "analítico, aplicado, crítico). Mínimo 1 si el documento es muy corto."
+        ),
     )
 
     @field_validator("competency_name", mode="before")
@@ -557,7 +564,11 @@ class DashboardDocumentCompetencies(BaseModel):
 
     document_id: str = Field(
         ...,
-        description="Clave del documento en el registro (filename del PDF u origen)",
+        description="Clave canónica del documento (video_id para YouTube, basename para PDFs)",
+    )
+    display_name: Optional[str] = Field(
+        None,
+        description="Nombre legible para mostrar (título del vídeo, nombre del PDF…)",
     )
     competencies: List[DashboardCompetencyItem] = Field(
         default_factory=list,

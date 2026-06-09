@@ -107,6 +107,8 @@ export interface DashboardCompetencyItem {
 /** Espejo de `DashboardDocumentCompetencies`. */
 export interface DashboardDocumentCompetencies {
   document_id: string;
+  /** Nombre legible (título del vídeo, nombre del PDF). Presente si el backend lo conoce. */
+  display_name?: string | null;
   competencies: DashboardCompetencyItem[];
 }
 
@@ -466,13 +468,19 @@ export async function getTaskStatus(taskId: string): Promise<TaskStatusResponse>
  */
 export async function getDashboardCompetencies(
   sessionId: string,
-  projectDocumentNames?: readonly string[],
+  /** Claves de búsqueda de documentos (docKey, no el nombre de display). */
+  projectDocumentKeys?: readonly string[],
   accessToken?: string | null,
 ): Promise<DashboardCompetencyResponse> {
   try {
     const headers: Record<string, string> = {};
-    if (projectDocumentNames?.length) {
-      headers["X-Project-Document-Keys"] = JSON.stringify([...projectDocumentNames]);
+    if (projectDocumentKeys?.length) {
+      // encodeURIComponent garantiza que el valor sea ASCII puro (los títulos
+      // de vídeos de YouTube pueden contener caracteres fuera de ISO-8859-1
+      // que el constructor Headers del navegador rechaza con TypeError).
+      headers["X-Project-Document-Keys"] = encodeURIComponent(
+        JSON.stringify([...projectDocumentKeys]),
+      );
     }
     return await fetchJson<DashboardCompetencyResponse>(
       `${BACKEND_URL}/dashboard/competencies`,
