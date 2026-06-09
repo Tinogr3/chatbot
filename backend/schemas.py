@@ -1,6 +1,7 @@
 """
 Modelos Pydantic estrictos para inputs/outputs de la API y del RAG.
 """
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -464,7 +465,7 @@ class ExtractedLearningOutcome(BaseModel):
 
     description: str = Field(
         ...,
-        min_length=24,
+        min_length=10,
         max_length=520,
         description=(
             "Redacta un único resultado observable: verbo de acción + objeto + "
@@ -486,19 +487,22 @@ class ExtractedSubcompetency(BaseModel):
 
     name: str = Field(
         ...,
-        min_length=10,
+        min_length=5,
         max_length=200,
         description=(
-            "Nombre corto y específico al contenido del PDF (procedimiento, norma, "
-            "herramienta o caso). Debe diferenciarse claramente de la competencia "
-            "principal y de la otra subcompetencia. Evita títulos genéricos."
+            "Nombre corto y específico al contenido del documento (procedimiento, norma, "
+            "herramienta, concepto clave o caso). Debe diferenciarse claramente de la "
+            "competencia principal y de las demás subcompetencias. Evita títulos genéricos."
         ),
     )
     learning_outcomes: List[ExtractedLearningOutcome] = Field(
         ...,
         min_length=1,
-        max_length=1,
-        description="Exactamente un resultado de aprendizaje evaluable para esta subcompetencia",
+        max_length=2,
+        description=(
+            "Entre 1 y 2 resultados de aprendizaje evaluables para esta subcompetencia: "
+            "uno de tipo conceptual/analítico y otro de tipo práctico/aplicado."
+        ),
     )
 
     @field_validator("name", mode="before")
@@ -514,19 +518,23 @@ class ExtractedCompetencyTree(BaseModel):
 
     competency_name: str = Field(
         ...,
-        min_length=10,
+        min_length=5,
         max_length=200,
         description=(
             "Competencia principal alineada al propósito del documento (no genérica). "
             "Debe nombrar el ámbito concreto (p. ej. normativa X, proceso Y, análisis Z). "
-            "Las dos subcompetencias deben ser facetas distintas de esta misma competencia."
+            "Las subcompetencias deben ser facetas distintas de esta misma competencia."
         ),
     )
     subcompetencies: List[ExtractedSubcompetency] = Field(
         ...,
-        min_length=2,
-        max_length=2,
-        description="Exactamente 2 subcompetencias: ortogonales entre sí y no redundantes",
+        min_length=1,
+        max_length=5,
+        description=(
+            "Entre 3 y 5 subcompetencias específicas y ortogonales entre sí, "
+            "cubriendo distintos aspectos del documento (conceptual, procedimental, "
+            "analítico, aplicado, crítico). Mínimo 1 si el documento es muy corto."
+        ),
     )
 
     @field_validator("competency_name", mode="before")
@@ -556,7 +564,11 @@ class DashboardDocumentCompetencies(BaseModel):
 
     document_id: str = Field(
         ...,
-        description="Clave del documento en el registro (filename del PDF u origen)",
+        description="Clave canónica del documento (video_id para YouTube, basename para PDFs)",
+    )
+    display_name: Optional[str] = Field(
+        None,
+        description="Nombre legible para mostrar (título del vídeo, nombre del PDF…)",
     )
     competencies: List[DashboardCompetencyItem] = Field(
         default_factory=list,
@@ -571,3 +583,90 @@ class DashboardCompetencyResponse(BaseModel):
         default_factory=list,
         description="Un bloque por cada documento del proyecto, en orden de registro",
     )
+
+
+# =====================================================================
+# Autenticación JWT
+# =====================================================================
+
+_PASSWORD_RE = re.compile(
+    r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).{8,}$"
+)
+_USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,50}$")
+
+
+class UserCreate(BaseModel):
+    """Body de POST /auth/register."""
+
+    username: str = Field(
+        ...,
+        min_length=3,
+        max_length=50,
+        description="Solo minúsculas, dígitos, guion o guion bajo (3–50 caracteres)",
+    )
+    password: str = Field(
+        ...,
+        min_length=8,
+        description="Mínimo 8 caracteres con mayúscula, minúscula, dígito y carácter especial",
+    )
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def normalize_username(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
+    @field_validator("username")
+    @classmethod
+    def validate_username_pattern(cls, v: str) -> str:
+        if not _USERNAME_RE.match(v):
+            raise ValueError(
+                "El nombre de usuario solo puede contener letras minúsculas, números, "
+                "guion (-) o guion bajo (_), con entre 3 y 50 caracteres. "
+            )
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_complexity(cls, v: str) -> str:
+        if not _PASSWORD_RE.match(v):
+            raise ValueError(
+                "La contraseña debe tener al menos 8 caracteres e incluir: "
+                "una mayúscula (A-Z), una minúscula (a-z), un dígito (0-9) y "
+                "un carácter especial (!@#$%...). "
+            )
+        return v
+
+
+class UserLogin(BaseModel):
+    """Body de POST /auth/login."""
+
+    username: str = Field(..., min_length=1, max_length=50)
+    password: str = Field(..., min_length=1)
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def normalize_username(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
+
+class TokenResponse(BaseModel):
+    """Respuesta de login/registro/refresh con el access token JWT."""
+
+    access_token: str = Field(..., description="JWT de acceso (Bearer)")
+    token_type: str = Field("bearer", description="Tipo de token")
+    expires_in: int = Field(..., description="Vida útil del access token en segundos")
+
+
+class UserOut(BaseModel):
+    """Datos públicos del usuario autenticado."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    email: Optional[str] = None
+    created_at: datetime

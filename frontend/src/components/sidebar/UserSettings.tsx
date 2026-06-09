@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronUp, LogOut, Settings, Trash2, X } from "lucide-react";
-import { clearSession, deleteUserFacts } from "@/lib/api";
+import { clearSession } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { useUser } from "@/context/UserContext";
 import { useProjects } from "@/context/ProjectsContext";
 import { dictionaries } from "@/locales";
@@ -13,12 +14,13 @@ const tConfirm = t.confirmClear;
 type ToastState = { message: string; type: "success" | "error" } | null;
 
 export default function UserSettings() {
+  const { accessToken, logout: authLogout } = useAuth();
   const { sessionId, logout } = useUser();
   const { projects, effectiveSessionId, clearAllProjects } = useProjects();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [toast, setToast] = useState<ToastState>(null);
-  const [actionLoading, setActionLoading] = useState<"clear" | "facts" | null>(null);
+  const [actionLoading, setActionLoading] = useState<"clear" | "logout" | null>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,20 +35,12 @@ export default function UserSettings() {
         setSettingsOpen(false);
       }
     }
-
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   /**
-   * Borra todos los datos backend del usuario:
-   *  - Para cada proyecto se compone su `${user}__${projectId}` y se invocan en
-   *    paralelo `clearSession` (chat history + document registry + chroma) y
-   *    `deleteUserFacts` (memoria del usuario).
-   *  - Se ignoran fallos individuales para garantizar que el resto de
-   *    proyectos también se purgue (Promise.allSettled).
-   *  - Tras el borrado backend, se limpia el estado/localStorage del cliente
-   *    y se cierra la sesión devolviendo al usuario al WelcomeScreen.
+   * Borra todos los datos del backend (proyectos, chat, documentos) y cierra sesión.
    */
   const handleConfirmClear = useCallback(async () => {
     if (!sessionId) return;
@@ -59,12 +53,9 @@ export default function UserSettings() {
             ? [effectiveSessionId]
             : [];
 
-      const operations = sessionIdsToWipe.flatMap((compositeId) => [
-        clearSession(compositeId),
-        deleteUserFacts(compositeId),
-      ]);
-
-      await Promise.allSettled(operations);
+      await Promise.allSettled(
+        sessionIdsToWipe.map((compositeId) => clearSession(compositeId, accessToken))
+      );
 
       clearAllProjects();
       setConfirmOpen(false);
@@ -79,23 +70,21 @@ export default function UserSettings() {
     } finally {
       setActionLoading(null);
     }
-  }, [sessionId, projects, effectiveSessionId, clearAllProjects, logout]);
+  }, [sessionId, projects, effectiveSessionId, clearAllProjects, logout, accessToken]);
 
-  const handleDeleteUserFacts = useCallback(async () => {
-    if (!effectiveSessionId) return;
-    setActionLoading("facts");
+  /**
+   * Cierra sesión JWT sin borrar ningún dato. El usuario puede volver a entrar
+   * con sus credenciales y recuperar todos sus proyectos y chats.
+   */
+  const handleLogout = useCallback(async () => {
+    setActionLoading("logout");
+    setSettingsOpen(false);
     try {
-      const res = await deleteUserFacts(effectiveSessionId);
-      setToast({ message: t.forgetDataSuccess(res.deleted), type: "success" });
-    } catch (e) {
-      setToast({
-        message: e instanceof Error ? e.message : t.forgetDataError,
-        type: "error",
-      });
+      await authLogout();
     } finally {
       setActionLoading(null);
     }
-  }, [effectiveSessionId]);
+  }, [authLogout]);
 
   return (
     <div className="p-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
@@ -114,6 +103,7 @@ export default function UserSettings() {
 
         {settingsOpen && (
           <div className="absolute bottom-full left-0 right-0 mb-1 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg z-10">
+            {/* Limpiar sesión — borra todos los datos */}
             <button
               type="button"
               onClick={() => {
@@ -121,19 +111,23 @@ export default function UserSettings() {
                 setSettingsOpen(false);
               }}
               disabled={!!actionLoading}
-              className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
             >
-              <LogOut className="w-4 h-4 shrink-0" />
+              <Trash2 className="w-4 h-4 shrink-0" />
               {actionLoading === "clear" ? t.clearSessionLoading : t.clearSession}
             </button>
+
+            <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+
+            {/* Cerrar sesión — conserva todos los datos */}
             <button
               type="button"
-              onClick={handleDeleteUserFacts}
+              onClick={handleLogout}
               disabled={!!actionLoading}
               className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
             >
-              <Trash2 className="w-4 h-4 shrink-0" />
-              {actionLoading === "facts" ? t.forgetDataLoading : t.forgetData}
+              <LogOut className="w-4 h-4 shrink-0" />
+              {actionLoading === "logout" ? t.logoutLoading : t.logout}
             </button>
           </div>
         )}

@@ -1,7 +1,7 @@
-# Variables de entorno
+# Variables de entorno (nunca subir al repositorio)
 .env
+.env.*
 .env.local
-.env.*.local
 
 # Archivos de credenciales JSON (Google Cloud, etc.)
 *.json
@@ -10,36 +10,19 @@
 !tsconfig.json
 !jsconfig.json
 
-# Entorno virtual de Python
-venv/
-env/
-ENV/
-.venv/
-
-# Base de datos ChromaDB
+# Bases de datos y datos de runtime
 chroma_db/
 *.db
 *.sqlite3
+backend/data/
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-# Solo artefactos Python en la raíz del repo; no usar `lib/` suelto (ignoraría frontend/src/lib/).
-/lib/
-/lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -62,8 +45,7 @@ Thumbs.db
 *.tmp
 *.temp
 
-# Node / Next (por si se generan fuera de frontend/)
+# Node / Next
 node_modules/
 .next/
 out/
-

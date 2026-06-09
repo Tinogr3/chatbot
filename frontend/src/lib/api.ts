@@ -107,6 +107,8 @@ export interface DashboardCompetencyItem {
 /** Espejo de `DashboardDocumentCompetencies`. */
 export interface DashboardDocumentCompetencies {
   document_id: string;
+  /** Nombre legible (título del vídeo, nombre del PDF). Presente si el backend lo conoce. */
+  display_name?: string | null;
   competencies: DashboardCompetencyItem[];
 }
 
@@ -158,10 +160,12 @@ export interface ChatOptions {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function sessionHeaders(sessionId: string): HeadersInit {
-  return {
+function sessionHeaders(sessionId: string, accessToken?: string | null): HeadersInit {
+  const h: Record<string, string> = {
     "X-Session-Id": sessionId.trim().toLowerCase().replace(/\s+/g, "_"),
   };
+  if (accessToken) h["Authorization"] = `Bearer ${accessToken}`;
+  return h;
 }
 
 async function parseErrorResponse(res: Response): Promise<string> {
@@ -184,12 +188,15 @@ async function parseErrorResponse(res: Response): Promise<string> {
 
 async function fetchJson<T>(
   url: string,
-  options: RequestInit & { sessionId?: string } = {}
+  options: RequestInit & { sessionId?: string; accessToken?: string | null } = {}
 ): Promise<T> {
-  const { sessionId, ...init } = options;
+  const { sessionId, accessToken, ...init } = options;
   const headers = new Headers(init.headers as Headers);
   if (sessionId !== undefined) {
     headers.set("X-Session-Id", sessionId.trim().toLowerCase().replace(/\s+/g, "_"));
+  }
+  if (accessToken) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
   }
   const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
@@ -212,7 +219,8 @@ async function fetchJson<T>(
 export async function chat(
   message: string,
   sessionId: string,
-  options: ChatOptions = {}
+  options: ChatOptions = {},
+  accessToken?: string | null,
 ): Promise<ChatResponse> {
   const body = {
     message: message.trim(),
@@ -228,6 +236,8 @@ export async function chat(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      sessionId,
+      accessToken,
     });
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));
@@ -237,11 +247,12 @@ export async function chat(
 /**
  * GET /history — Obtiene el historial de mensajes de la sesión.
  */
-export async function getHistory(sessionId: string): Promise<HistoryResponse> {
+export async function getHistory(sessionId: string, accessToken?: string | null): Promise<HistoryResponse> {
   try {
     return await fetchJson<HistoryResponse>(`${BACKEND_URL}/history`, {
       method: "GET",
       sessionId,
+      accessToken,
     });
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));
@@ -251,11 +262,12 @@ export async function getHistory(sessionId: string): Promise<HistoryResponse> {
 /**
  * DELETE /history — Borra el historial de chat de la sesión.
  */
-export async function deleteHistory(sessionId: string): Promise<DeletedCountResponse> {
+export async function deleteHistory(sessionId: string, accessToken?: string | null): Promise<DeletedCountResponse> {
   try {
     return await fetchJson<DeletedCountResponse>(`${BACKEND_URL}/history`, {
       method: "DELETE",
       sessionId,
+      accessToken,
     });
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));
@@ -265,11 +277,12 @@ export async function deleteHistory(sessionId: string): Promise<DeletedCountResp
 /**
  * GET /user_facts — Obtiene los hechos almacenados sobre el usuario.
  */
-export async function getUserFacts(sessionId: string): Promise<UserFactsResponse> {
+export async function getUserFacts(sessionId: string, accessToken?: string | null): Promise<UserFactsResponse> {
   try {
     return await fetchJson<UserFactsResponse>(`${BACKEND_URL}/user_facts`, {
       method: "GET",
       sessionId,
+      accessToken,
     });
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));
@@ -279,11 +292,12 @@ export async function getUserFacts(sessionId: string): Promise<UserFactsResponse
 /**
  * DELETE /user_facts — Borra todos los hechos del usuario.
  */
-export async function deleteUserFacts(sessionId: string): Promise<DeletedCountResponse> {
+export async function deleteUserFacts(sessionId: string, accessToken?: string | null): Promise<DeletedCountResponse> {
   try {
     return await fetchJson<DeletedCountResponse>(`${BACKEND_URL}/user_facts`, {
       method: "DELETE",
       sessionId,
+      accessToken,
     });
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));
@@ -293,11 +307,12 @@ export async function deleteUserFacts(sessionId: string): Promise<DeletedCountRe
 /**
  * POST /session/clear — Limpia historial, documentos y vector store de la sesión.
  */
-export async function clearSession(sessionId: string): Promise<ClearSessionResponse> {
+export async function clearSession(sessionId: string, accessToken?: string | null): Promise<ClearSessionResponse> {
   try {
     return await fetchJson<ClearSessionResponse>(`${BACKEND_URL}/session/clear`, {
       method: "POST",
       sessionId,
+      accessToken,
     });
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));
@@ -307,30 +322,33 @@ export async function clearSession(sessionId: string): Promise<ClearSessionRespo
 /**
  * GET /discovery/stats — Conteos de resúmenes y exámenes guardados para la sesión.
  */
-export async function getDiscoveryStats(sessionId: string): Promise<DiscoveryStats> {
+export async function getDiscoveryStats(sessionId: string, accessToken?: string | null): Promise<DiscoveryStats> {
   return fetchJson<DiscoveryStats>(`${BACKEND_URL}/discovery/stats`, {
     method: "GET",
     sessionId,
+    accessToken,
   });
 }
 
 /**
  * GET /discovery/summaries — Lista de resúmenes generados desde el chat.
  */
-export async function getDiscoverySummaries(sessionId: string): Promise<DiscoveryItem[]> {
+export async function getDiscoverySummaries(sessionId: string, accessToken?: string | null): Promise<DiscoveryItem[]> {
   return fetchJson<DiscoveryItem[]>(`${BACKEND_URL}/discovery/summaries`, {
     method: "GET",
     sessionId,
+    accessToken,
   });
 }
 
 /**
  * GET /discovery/exams — Lista de exámenes generados desde el chat.
  */
-export async function getDiscoveryExams(sessionId: string): Promise<DiscoveryItem[]> {
+export async function getDiscoveryExams(sessionId: string, accessToken?: string | null): Promise<DiscoveryItem[]> {
   return fetchJson<DiscoveryItem[]>(`${BACKEND_URL}/discovery/exams`, {
     method: "GET",
     sessionId,
+    accessToken,
   });
 }
 
@@ -342,9 +360,9 @@ export async function getDiscoveryExams(sessionId: string): Promise<DiscoveryIte
 export async function createPodcastAudio(
   sessionId: string,
   summaryIds?: number[],
-  options?: { signal?: AbortSignal }
+  options?: { signal?: AbortSignal; accessToken?: string | null }
 ): Promise<Blob> {
-  const headers = new Headers(sessionHeaders(sessionId));
+  const headers = new Headers(sessionHeaders(sessionId, options?.accessToken));
   let body: string | undefined;
   if (summaryIds !== undefined) {
     if (summaryIds.length === 0) {
@@ -369,7 +387,7 @@ export async function createPodcastAudio(
 /**
  * POST /upload — Sube un PDF (encola tarea). Usar getTaskStatus(task_id) para el progreso.
  */
-export async function uploadPdf(file: File, sessionId: string): Promise<TaskEnqueuedResponse> {
+export async function uploadPdf(file: File, sessionId: string, accessToken?: string | null): Promise<TaskEnqueuedResponse> {
   if (!file.name.toLowerCase().endsWith(".pdf")) {
     throw new Error("Solo se aceptan archivos PDF");
   }
@@ -378,7 +396,7 @@ export async function uploadPdf(file: File, sessionId: string): Promise<TaskEnqu
   try {
     const res = await fetch(`${BACKEND_URL}/upload`, {
       method: "POST",
-      headers: sessionHeaders(sessionId),
+      headers: sessionHeaders(sessionId, accessToken),
       body: form,
     });
     if (!res.ok) {
@@ -394,11 +412,12 @@ export async function uploadPdf(file: File, sessionId: string): Promise<TaskEnqu
 /**
  * POST /upload/load_cloud — Carga todos los PDFs del bucket para la sesión.
  */
-export async function loadCloudPdfs(sessionId: string): Promise<TaskEnqueuedResponse> {
+export async function loadCloudPdfs(sessionId: string, accessToken?: string | null): Promise<TaskEnqueuedResponse> {
   try {
     return await fetchJson<TaskEnqueuedResponse>(`${BACKEND_URL}/upload/load_cloud`, {
       method: "POST",
       sessionId,
+      accessToken,
     });
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));
@@ -411,7 +430,8 @@ export async function loadCloudPdfs(sessionId: string): Promise<TaskEnqueuedResp
  */
 export async function processVideo(
   url: string,
-  sessionId: string
+  sessionId: string,
+  accessToken?: string | null,
 ): Promise<TaskEnqueuedResponse> {
   try {
     return await fetchJson<TaskEnqueuedResponse>(`${BACKEND_URL}/process_video`, {
@@ -419,6 +439,7 @@ export async function processVideo(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: url.trim(), session_id: sessionId.trim().toLowerCase().replace(/\s+/g, "_") }),
       sessionId,
+      accessToken,
     });
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));
@@ -447,12 +468,19 @@ export async function getTaskStatus(taskId: string): Promise<TaskStatusResponse>
  */
 export async function getDashboardCompetencies(
   sessionId: string,
-  projectDocumentNames?: readonly string[],
+  /** Claves de búsqueda de documentos (docKey, no el nombre de display). */
+  projectDocumentKeys?: readonly string[],
+  accessToken?: string | null,
 ): Promise<DashboardCompetencyResponse> {
   try {
     const headers: Record<string, string> = {};
-    if (projectDocumentNames?.length) {
-      headers["X-Project-Document-Keys"] = JSON.stringify([...projectDocumentNames]);
+    if (projectDocumentKeys?.length) {
+      // encodeURIComponent garantiza que el valor sea ASCII puro (los títulos
+      // de vídeos de YouTube pueden contener caracteres fuera de ISO-8859-1
+      // que el constructor Headers del navegador rechaza con TypeError).
+      headers["X-Project-Document-Keys"] = encodeURIComponent(
+        JSON.stringify([...projectDocumentKeys]),
+      );
     }
     return await fetchJson<DashboardCompetencyResponse>(
       `${BACKEND_URL}/dashboard/competencies`,
@@ -460,6 +488,7 @@ export async function getDashboardCompetencies(
         method: "GET",
         sessionId,
         headers,
+        accessToken,
       },
     );
   } catch (e) {
@@ -480,6 +509,7 @@ export async function getDashboardCompetencies(
 export async function submitEvaluation(
   data: EvaluateLearningRequest,
   sessionId: string,
+  accessToken?: string | null,
 ): Promise<EvaluateLearningResponse> {
   try {
     return await fetchJson<EvaluateLearningResponse>(`${BACKEND_URL}/evaluate`, {
@@ -487,6 +517,7 @@ export async function submitEvaluation(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
       sessionId,
+      accessToken,
     });
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));

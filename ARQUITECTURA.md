@@ -1,8 +1,8 @@
 # Arquitectura — Chatbot RAG educativo
 
-El proyecto separa **backend** (API FastAPI + Celery + RAG), **frontend** (Next.js) y **Redis** (broker de Celery). El frontend solo se comunica con el backend por HTTP; no contiene la lógica de RAG ni acceso directo a bases de datos del servidor.
+El proyecto separa **backend** (API FastAPI + Celery + RAG), **frontend** (Next.js) y la infraestructura de datos (**PostgreSQL**, **Redis**, **Chroma**). El frontend solo se comunica con el backend por HTTP; no contiene la lógica de RAG ni acceso directo a bases de datos.
 
-Instrucciones de instalación y arranque: **[README.md](README.md)** (incluye `./run.sh`, variables de entorno y qué instala en un clone nuevo).
+Instrucciones de arranque y configuración: **[README.md](README.md)**.
 
 ## Frontend (Next.js)
 
@@ -15,6 +15,8 @@ La URL del backend en el cliente se configura con **`NEXT_PUBLIC_BACKEND_URL`** 
 ```
 chatbot-test/
 ├── backend/                      # API FastAPI, worker Celery, RAG
+│   ├── Dockerfile                # Imagen del backend y worker
+│   ├── requirements.txt          # Dependencias Python
 │   ├── main.py                   # App FastAPI, CORS, routers
 │   ├── config.py                 # Variables de entorno y ajustes HTTP
 │   ├── schemas.py                # Modelos Pydantic
@@ -33,9 +35,10 @@ chatbot-test/
 │   ├── logger.py
 │   ├── exceptions.py
 │   ├── api/                      # Routers por dominio
-│   └── requirements.txt          # Paquetes Python (referenciados desde la raíz)
+│   └── data/                     # Datos en runtime (Chroma, SQLite — ignorados por git)
 │
 ├── frontend/                     # Cliente Next.js (TypeScript)
+│   ├── Dockerfile                # Build multietapa (builder + runner)
 │   ├── package.json
 │   ├── next.config.ts
 │   ├── tsconfig.json
@@ -49,14 +52,13 @@ chatbot-test/
 │   │   └── constants/            # p. ej. dashboardConfig
 │   └── public/                   # Activos estáticos
 │
-├── requirements.txt              # Entrada única pip en la raíz (-r backend/requirements.txt)
-├── run.sh                        # venv, deps, Redis, backend, Celery, Next.js
+├── docker-compose.yml            # Orquestación de todos los servicios
+├── deploy.sh                     # Script de despliegue (valida, construye, arranca)
+├── .env                          # Variables reales de entorno (no versionar)
+├── .env.example                  # Plantilla para crear .env
 ├── ARQUITECTURA.md               # Este documento
-├── README.md                     # Guía de uso y arranque
-└── .env                          # Secretos (no versionar; usar .env.example)
+└── README.md                     # Guía de uso y arranque
 ```
-
-Datos en runtime (Chroma, SQLite, etc.) suelen generarse bajo rutas configuradas en el backend y están ignoradas por git (ver `.gitignore`).
 
 ## Endpoints principales del backend
 
@@ -84,8 +86,12 @@ Prefijos de router salvo donde se indique lo contrario. Donde aplica, enviar **`
 
 Para el detalle de cuerpos y cabeceras, conviene revisar los routers en `backend/api/` y los esquemas en `schemas.py`.
 
-## Flujo local unificado
+## Flujo de despliegue
 
-Un solo comando desde la raíz — **`./run.sh`** — crea el `venv` si falta, instala dependencias Python (`requirements.txt` en la raíz) y, si no hay `frontend/node_modules`, ejecuta **`npm ci`**. Luego arranca Redis (si la política del script lo permite), el backend, Celery y el modo desarrollo de Next.js. Ver **[README.md](README.md)** para variables (`BACKEND_PORT`, `FRONTEND_PORT`, `REDIS_*`, etc.).
+Todo se arranca con un único comando desde la raíz:
 
-En producción, el frontend se construye con `npm run build` y se sirve con `npm run start` (u orquestación equivalente); el backend se despliega según tu plataforma.
+```bash
+./deploy.sh
+```
+
+Esto ejecuta `docker compose --env-file .env up --build -d` tras validar el entorno. Docker Compose levanta los cinco servicios (`db`, `redis`, `backend`, `worker`, `frontend`) con sus healthchecks y dependencias en orden. Ver **[README.md](README.md)** para variables de configuración, operaciones habituales y notas sobre credenciales GCP.

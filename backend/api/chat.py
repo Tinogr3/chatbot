@@ -3,19 +3,20 @@ Endpoints de chat - POST /chat
 """
 from typing import Any, Iterable, List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.evaluation import record_learning_progress
+from auth import get_validated_session
 from chat_manager import ChatHistoryManager
 from discovery_repo import add_stored_exam, add_stored_summary
 from database import get_db
 from document_registry import load_document_registry
 from logger import get_logger
 from models import Competency, LearningOutcome, Subcompetency
-from rag_engine import extract_text, initialize_agent, initialize_vector_store_async
+from rag_engine import initialize_agent, initialize_vector_store_async
 from router import (
     QueryCategory,
     LearningFlowManager,
@@ -147,12 +148,9 @@ async def _find_learning_outcome_for_sources(
 @router.post("", response_model=ChatResponse)
 async def chat(
     body: ChatRequest,
-    x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    session_id: str = Depends(get_validated_session),
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
-    session_id = (body.session_id or x_session_id or "").strip().lower().replace(" ", "_")
-    if not session_id:
-        raise HTTPException(status_code=400, detail="session_id requerido (header X-Session-Id o body)")
     prompt = (body.message or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="message vacío")
@@ -222,12 +220,11 @@ async def chat(
                     learning_topic,
                     exc,
                 )
-            except Exception as exc:  # pragma: no cover - red de seguridad
+            except Exception:  # pragma: no cover
                 logger.exception(
                     "Error inesperado registrando progreso (session=%s).",
                     session_id,
                 )
-                _ = exc  # silencia linters sobre variable no usada
     # Modo aprendizaje activado pero sin tema: el mensaje actual es el tema (iniciar sesión)
     elif learning_mode and not (learning_topic or "").strip():
         vector_store = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)

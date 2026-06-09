@@ -1,29 +1,20 @@
-"""
-Endpoints de subida de PDFs - POST /upload (asíncrono), POST /upload/load_cloud
-"""
 import asyncio
 import base64
-from typing import Optional
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-from logger import get_logger
+from auth import get_validated_session
 from schemas import TaskEnqueuedResponse
-from session_ids import normalize_session_id
 
-logger = get_logger("api.upload")
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 
 @router.post("", response_model=TaskEnqueuedResponse)
 async def upload_pdf(
     file: UploadFile = File(...),
-    x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    session_id: str = Depends(get_validated_session),
 ) -> TaskEnqueuedResponse:
     """Encola el procesamiento del PDF y devuelve task_id. Consultar GET /status/{task_id} para progreso."""
-    session_id = normalize_session_id(x_session_id)
-    if not session_id:
-        raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Solo se aceptan archivos PDF")
 
@@ -49,11 +40,8 @@ async def upload_pdf(
 
 @router.post("/load_cloud", response_model=TaskEnqueuedResponse)
 def load_cloud_pdfs(
-    x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
+    session_id: str = Depends(get_validated_session),
 ) -> TaskEnqueuedResponse:
-    session_id = normalize_session_id(x_session_id)
-    if not session_id:
-        raise HTTPException(status_code=400, detail="Header X-Session-Id requerido")
 
     # Validación estricta antes de encolar para que el cliente reciba
     # un error claro (en lugar de fallos silenciosos en background).

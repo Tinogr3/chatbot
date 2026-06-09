@@ -6,17 +6,20 @@ import MainContent from "@/components/MainContent";
 import ChatPanel from "@/components/ChatPanel";
 import { WelcomeScreen } from "@/components/auth/WelcomeScreen";
 import { useChat } from "@/hooks/useChat";
+import { AuthProvider } from "@/context/AuthContext";
 import { UserProvider, useUser } from "@/context/UserContext";
 import { ProjectsProvider, useProjects } from "@/context/ProjectsContext";
 import { dictionaries } from "@/locales";
 
 export default function DashboardPage() {
   return (
-    <UserProvider>
-      <ProjectsProvider>
-        <DashboardGate />
-      </ProjectsProvider>
-    </UserProvider>
+    <AuthProvider>
+      <UserProvider>
+        <ProjectsProvider>
+          <DashboardGate />
+        </ProjectsProvider>
+      </UserProvider>
+    </AuthProvider>
   );
 }
 

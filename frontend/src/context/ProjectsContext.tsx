@@ -17,7 +17,16 @@ export type DocumentSource = "manual" | "cloud" | "youtube";
 
 export type ProjectDocument = {
   id: string;
+  /** Nombre para mostrar (título del vídeo, nombre del PDF…). */
   name: string;
+  /**
+   * Clave de búsqueda usada en el dashboard de competencias.
+   * Para vídeos de YouTube: el video_id (11 chars).
+   * Para PDFs: igual que `name`.
+   * Si el campo no está (datos almacenados antes de esta versión),
+   * usar `name` como fallback.
+   */
+  docKey?: string;
   source: DocumentSource;
   addedAt: number;
 };
@@ -120,7 +129,7 @@ export type ProjectsContextValue = {
   renameProject: (projectId: string, name: string) => void;
   selectProject: (projectId: string) => void;
   deleteProject: (projectId: string) => void;
-  addDocumentsToCurrent: (inputs: Array<{ name: string; source: DocumentSource }>) => void;
+  addDocumentsToCurrent: (inputs: Array<{ name: string; docKey?: string; source: DocumentSource }>) => void;
   /**
    * Borra todos los proyectos del usuario actual del estado y de localStorage.
    * No realiza llamadas de red: la cascada de limpieza backend (chat history,
@@ -224,7 +233,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addDocumentsToCurrent = useCallback(
-    (inputs: Array<{ name: string; source: DocumentSource }>) => {
+    (inputs: Array<{ name: string; docKey?: string; source: DocumentSource }>) => {
       if (inputs.length === 0) return;
       setState((prev) => {
         if (!prev.currentProjectId) return prev;
@@ -232,6 +241,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
         const newDocuments: ProjectDocument[] = inputs.map((input, index) => ({
           id: generateId("doc"),
           name: input.name,
+          docKey: input.docKey ?? input.name,
           source: input.source,
           addedAt: baseTimestamp + index,
         }));

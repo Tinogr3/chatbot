@@ -14,6 +14,8 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
+    DateTime,
     Enum,
     Float,
     ForeignKey,
@@ -26,6 +28,69 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
+
+
+# ---------------------------------------------------------------------------
+# Usuarios y tokens de refresco (autenticación JWT)
+# ---------------------------------------------------------------------------
+
+class User(Base):
+    """Cuenta de usuario. La contraseña se almacena hasheada con bcrypt."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(
+        String(50), unique=True, nullable=False, index=True
+    )
+    email: Mapped[str | None] = mapped_column(
+        String(255), unique=True, nullable=True, index=True
+    )
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), nullable=False
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    refresh_tokens: Mapped[list[RefreshToken]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="dynamic",
+    )
+
+    def __repr__(self) -> str:
+        return f"<User id={self.id} username={self.username!r}>"
+
+
+class RefreshToken(Base):
+    """Token de refresco persistido (hash SHA-256) para poder revocarlo."""
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False, index=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    is_revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="refresh_tokens")
+
+    __table_args__ = (Index("ix_refresh_tokens_user_id", "user_id"),)
+
+    def __repr__(self) -> str:
+        return f"<RefreshToken id={self.id} user_id={self.user_id} revoked={self.is_revoked}>"
 
 
 # ---------------------------------------------------------------------------

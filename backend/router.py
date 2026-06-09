@@ -184,7 +184,7 @@ def get_exam_response(
             return {"answer": "No hay documentos disponibles para crear el examen.", "source_documents": []}
         context_parts = [f"[{d.metadata.get('source', 'Desconocido')}]\n{d.page_content}" for d in docs]
         context = "\n\n---\n\n".join(context_parts)
-        exam_prompt = f"""Eres un profesor que prepara un examen escrito en español a partir del material de referencia.
+        exam_prompt = f"""Eres un profesor que prepara un examen escrito a partir del material de referencia.
 
 CONTENIDO (fragmentos del material; pueden estar desordenados):
 {context}
@@ -195,9 +195,8 @@ PETICIÓN DEL ESTUDIANTE:
 INSTRUCCIONES:
 1. Crea entre 8 y 12 preguntas que cubran los temas principales del material.
 2. Mezcla preguntas de opción múltiple (4 opciones: A, B, C, D) y 2-3 preguntas de desarrollo breve.
-3. Para cada pregunta tipo test, indica cuál es la respuesta correcta al final de esa pregunta entre paréntesis, ej: (Respuesta correcta: B).
-4. No inventes datos que contradigan el material; si algo no aparece, omítelo o dilo explícitamente.
-5. Al final del examen, incluye una sección "Clave de respuestas" solo para las de opción múltiple.
+3. No inventes datos que contradigan el material; si algo no aparece, omítelo o dilo explícitamente.
+4. Al final del examen, incluye una sección "Clave de respuestas" solo para las de opción múltiple.
 
 EXAMEN:"""
         response = llm.invoke(exam_prompt)

@@ -9,6 +9,7 @@ import {
   getTaskStatus,
   type TaskStatusResponse,
 } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { useProjects, type DocumentSource } from "@/context/ProjectsContext";
 import { dictionaries } from "@/locales";
 
@@ -30,7 +31,7 @@ const TABS: readonly TabDefinition[] = [
   { id: "youtube", label: t.tabs.youtube, icon: Youtube },
 ];
 
-type PendingDoc = { name: string; source: DocumentSource };
+type PendingDoc = { name: string; docKey?: string; source: DocumentSource };
 
 /**
  * Contexto de la tarea encolada que necesitamos para construir, en el momento
@@ -53,7 +54,17 @@ function resolveDocumentsFromTask(
     return [{ name: context.filename, source: "manual" }];
   }
   if (context.kind === "youtube") {
-    return [{ name: context.url, source: "youtube" }];
+    const title =
+      typeof result?.title === "string" && result.title.trim()
+        ? result.title
+        : context.url;
+    // docKey = video_id para que el dashboard use la clave canónica al consultar
+    // competencias; si no hay video_id en el resultado se usa la URL como fallback.
+    const docKey =
+      typeof result?.video_id === "string" && result.video_id.trim()
+        ? result.video_id
+        : context.url;
+    return [{ name: title, docKey, source: "youtube" }];
   }
   const filenames = (result as { filenames?: unknown } | null | undefined)?.filenames;
   if (!Array.isArray(filenames)) return [];
@@ -63,6 +74,7 @@ function resolveDocumentsFromTask(
 }
 
 export default function UploadManager() {
+  const { accessToken } = useAuth();
   const { effectiveSessionId, addDocumentsToCurrent } = useProjects();
 
   const [activeTab, setActiveTab] = useState<TabId>("manual");
@@ -113,13 +125,16 @@ export default function UploadManager() {
 
   useEffect(() => {
     if (!pendingTask || !taskStatus) return;
-    if (taskStatus.status === "SUCCESS") {
+    const trueSuccess =
+      taskStatus.status === "SUCCESS" && taskStatus.result?.success !== false;
+    if (trueSuccess) {
       const docs = resolveDocumentsFromTask(pendingTask, taskStatus.result);
       if (docs.length > 0) {
         addDocumentsToCurrent(docs);
       }
       setPendingTask(null);
-    } else if (taskStatus.status === "FAILURE") {
+    } else if (taskStatus.status === "FAILURE" ||
+      (taskStatus.status === "SUCCESS" && taskStatus.result?.success === false)) {
       setPendingTask(null);
     }
   }, [taskStatus, pendingTask, addDocumentsToCurrent]);
@@ -132,7 +147,7 @@ export default function UploadManager() {
     }
     setError(null);
     try {
-      const { task_id } = await uploadPdf(file, effectiveSessionId);
+      const { task_id } = await uploadPdf(file, effectiveSessionId, accessToken);
       setPendingTask({ kind: "manual", filename: file.name });
       setTaskId(task_id);
     } catch (e) {
@@ -147,7 +162,7 @@ export default function UploadManager() {
     setTaskId(null);
     setNubeLoading(true);
     try {
-      const { task_id } = await loadCloudPdfs(effectiveSessionId);
+      const { task_id } = await loadCloudPdfs(effectiveSessionId, accessToken);
       setPendingTask({ kind: "cloud" });
       setTaskId(task_id);
     } catch (e) {
@@ -166,7 +181,7 @@ export default function UploadManager() {
     }
     setError(null);
     try {
-      const { task_id } = await processVideo(url, effectiveSessionId);
+      const { task_id } = await processVideo(url, effectiveSessionId, accessToken);
       setPendingTask({ kind: "youtube", url });
       setTaskId(task_id);
     } catch (e) {
@@ -174,7 +189,13 @@ export default function UploadManager() {
     }
   };
 
-  const isTaskDone = taskStatus?.status === "SUCCESS" || taskStatus?.status === "FAILURE";
+  // Una tarea Celery puede terminar en SUCCESS pero con result.success === false
+  // (el worker captura excepciones y devuelve {success: false, error: "..."}).
+  // Tratamos ese caso como fallo visible para el usuario.
+  const isTaskTrueSuccess =
+    taskStatus?.status === "SUCCESS" && taskStatus?.result?.success !== false;
+  const isTaskDone = isTaskTrueSuccess || taskStatus?.status === "FAILURE" ||
+    (taskStatus?.status === "SUCCESS" && taskStatus?.result?.success === false);
   const isTaskRunning = !!taskId && !isTaskDone;
   const showTaskProgress = taskId && taskStatus && !isTaskDone;
   const showTaskResult = taskId && taskStatus && isTaskDone;
@@ -295,15 +316,19 @@ export default function UploadManager() {
       {showTaskResult && taskStatus && (
         <div
           className={`rounded-lg border p-3 text-sm ${
-            taskStatus.status === "SUCCESS"
+            isTaskTrueSuccess
               ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-700/50 text-emerald-800 dark:text-emerald-200"
               : "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200"
           }`}
         >
-          {taskStatus.status === "SUCCESS" ? (
+          {isTaskTrueSuccess ? (
             <p>{typeof taskStatus.result?.message === "string" ? taskStatus.result.message : t.result.successFallback}</p>
           ) : (
-            <p>{taskStatus.error ?? t.result.errorFallback}</p>
+            <p>
+              {typeof taskStatus.result?.error === "string"
+                ? taskStatus.result.error
+                : (taskStatus.error ?? t.result.errorFallback)}
+            </p>
           )}
           <button
             type="button"

@@ -1,84 +1,126 @@
 # Chatbot RAG educativo
 
-Aplicación web con **FastAPI** (backend), **Next.js** (frontend) y **Celery** (tareas en segundo plano: PDFs, vídeo). El cliente solo habla con el API por HTTP; la lógica de RAG, embeddings y almacenamiento vive en el servidor.
+Aplicación web con **FastAPI** (backend), **Next.js** (frontend), **Celery** (tareas asíncronas) y **PostgreSQL + Redis**, orquestada con **Docker Compose**.
 
 ## Requisitos previos
 
-| Herramienta | Uso |
-|-------------|-----|
-| **Python 3** | Entorno virtual en la raíz (`venv/`) |
-| **Node.js** (npm incluido; recomendado LTS) | Dependencias del frontend |
-| **Redis** | Cola de Celery (subidas y procesamiento pesado). Si no hay servidor en el puerto configurado, `run.sh` intenta arrancar `redis-server` cuando sea posible |
-| **curl** | Comprobación de salud del backend al arrancar |
+| Herramienta | Versión mínima |
+|-------------|----------------|
+| [Docker Desktop](https://docs.docker.com/get-docker/) | 24+ |
+| Docker Compose plugin | incluido con Docker Desktop |
 
-Opcional: **Google Cloud** (credenciales JSON, bucket, API Gemini) según `backend/config.py` y `.env.example`.
+No se necesita Python, Node ni Redis instalados en el host; todo corre dentro de los contenedores.
 
-## Arranque rápido (recomendado)
+## Arranque rápido
 
-Desde la raíz del repositorio:
+### 1. Obtener las credenciales de Google Cloud
+
+Descarga el JSON de la service account de GCP y colócalo en una ruta accesible de tu máquina (por ejemplo `/home/usuario/keys/service-account.json`). La service account necesita permisos sobre Vertex AI / Gemini y Cloud Storage.
+
+### 2. Copiar y configurar las variables de entorno
 
 ```bash
-chmod +x run.sh   # solo la primera vez en clones nuevos, si hiciera falta
-./run.sh
+cp .env.example .env
+```
+
+Abre `.env` y rellena los valores obligatorios:
+
+| Variable | Descripción |
+|----------|-------------|
+| `GOOGLE_APPLICATION_CREDENTIALS` | Ruta **absoluta** en el host al JSON de la service account (p. ej. `/home/usuario/keys/service-account.json`) |
+| `GOOGLE_API_KEY` | API key de Gemini |
+| `PROJECT_ID` | ID del proyecto de Google Cloud |
+| `BUCKET_NAME` | Nombre del bucket de Cloud Storage |
+| `POSTGRES_PASSWORD` | Contraseña segura para PostgreSQL |
+| `JWT_SECRET_KEY` | Clave secreta para firmar tokens JWT. Genera una con: `python -c "import secrets; print(secrets.token_hex(64))"` |
+| `ALLOWED_ORIGINS` | URL del frontend separada por comas (por defecto `http://localhost:3000`) |
+| `NEXT_PUBLIC_BACKEND_URL` | URL del backend vista desde el navegador (por defecto `http://localhost:8000`) |
+
+> **Nota sobre `NEXT_PUBLIC_BACKEND_URL`:** esta variable se incrusta en el bundle de Next.js en tiempo de compilación. Si el backend está en un servidor remoto, cámbiala en `.env` **antes** de ejecutar `./deploy.sh` o `docker compose build frontend`.
+
+### 3. Desplegar
+
+```bash
+chmod +x deploy.sh   # solo la primera vez
+./deploy.sh
 ```
 
 El script:
 
-1. Crea **`venv/`** con `python3 -m venv venv` si no existe y lo activa.
-2. Instala dependencias **Python** desde **`requirements.txt`** en la raíz (que delega en `backend/requirements.txt`).
-3. Si no existe **`frontend/node_modules/`**, ejecuta **`npm ci`** en `frontend/` (instalación reproducible con `package-lock.json`).
-4. Garantiza **Redis**, levanta **Uvicorn**, el **worker Celery** y **`npm run dev`** del frontend.
+1. Verifica que Docker y Docker Compose estén disponibles.
+2. Valida que `.env` exista y no contenga valores sin reemplazar.
+3. Crea el directorio `backend/data/` si no existe.
+4. Construye las imágenes e inicia los contenedores en segundo plano.
+5. Espera a que `db`, `redis` y `backend` superen el healthcheck.
+6. Muestra el estado final con `docker compose ps`.
 
-Puertos por defecto: API **8000**, Next.js **3000**. Variables útiles:
+Una vez levantado:
+
+- Frontend: <http://localhost:3000>
+- Backend / API: <http://localhost:8000/health>
+
+### Redespliegue sin reconstruir imágenes
 
 ```bash
-BACKEND_PORT=9000 FRONTEND_PORT=3001 ./run.sh
+./deploy.sh --no-build
 ```
 
-Si Redis no debe arrancarse automáticamente: `REDIS_AUTO_START=0 ./run.sh` (debes tener Redis ya escuchando).
-
-### Tras un `git pull` que cambie dependencias
-
-- **Python:** `./run.sh` vuelve a ejecutar `pip install -r requirements.txt` en cada arranque (rápido con caché).
-- **Node:** si ya tienes `frontend/node_modules/`, el script no reinstala. Si cambian `package.json` / `package-lock.json`, ejecuta:
-
-  ```bash
-  rm -rf frontend/node_modules
-  ./run.sh
-  ```
-
-  o manualmente: `(cd frontend && npm ci)`.
-
-## Configuración
-
-1. Copia el ejemplo de entorno: `cp .env.example .env`
-2. Rellena claves, proyecto GCP, bucket y ruta al JSON de credenciales (ver comentarios en `.env.example`).
-
-El frontend usa **`NEXT_PUBLIC_BACKEND_URL`** para la URL del API vista desde el navegador (por defecto `http://localhost:8000`). Defínela antes de `npm run dev` si el backend no está en ese host/puerto.
-
-## Desarrollo por piezas
-
-Sin `run.sh`, desde la raíz con `venv` activado y `export PYTHONPATH="$(pwd):${PYTHONPATH:-}"`:
+## Operaciones habituales
 
 ```bash
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+# Ver logs en tiempo real (todos los servicios)
+docker compose --env-file .env logs -f
+
+# Ver logs de un servicio concreto
+docker compose --env-file .env logs -f backend
+
+# Detener y eliminar contenedores (los datos se conservan)
+docker compose --env-file .env down
+
+# Detener y eliminar también los volúmenes (¡borra la base de datos!)
+docker compose --env-file .env down -v
+
+# Reconstruir solo el backend tras cambios en el código
+docker compose --env-file .env build backend
+./deploy.sh --no-build
 ```
 
-En otra terminal, `frontend/`:
+## Servicios
+
+| Servicio | Imagen / Build | Puerto host | Descripción |
+|----------|----------------|-------------|-------------|
+| `db` | `postgres:15-alpine` | — | PostgreSQL; datos persistidos en el volumen `postgres_data` |
+| `redis` | `redis:alpine` | — | Broker de Celery |
+| `backend` | `./backend/Dockerfile` | 8000 | API FastAPI + Uvicorn |
+| `worker` | `./backend/Dockerfile` | — | Worker Celery (PDFs, vídeos) |
+| `frontend` | `./frontend/Dockerfile` | 3000 | Next.js en modo producción |
+
+## Configuración avanzada
+
+### Credenciales GCP
+
+El archivo JSON indicado en `GOOGLE_APPLICATION_CREDENTIALS` se monta como solo lectura en `/app/credentials.json` dentro de los contenedores `backend` y `worker`. No se copia a la imagen; debe existir en la ruta indicada cada vez que se arranquen los contenedores.
+
+### Base de datos
+
+Las tablas se crean automáticamente en el primer arranque del backend (`SQLAlchemy create_all`). Si en el futuro se incorpora Alembic:
 
 ```bash
+docker compose --env-file .env exec backend alembic upgrade head
+```
+
+### Desarrollo aislado del frontend
+
+Si necesitas iterar solo en el frontend sin Docker (requiere Node.js 20+ en el host):
+
+```bash
+cd frontend
 npm ci
-npm run dev
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8000 npm run dev
 ```
 
-Para subidas y colas asíncronas necesitas **Redis** y un worker: `celery -A backend.worker worker --loglevel=info` (como hace `run.sh`).
+El backend debe estar corriendo y accesible en la URL indicada.
 
 ## Documentación de arquitectura
 
 Detalle de capas, carpetas y endpoints: **[ARQUITECTURA.md](ARQUITECTURA.md)**.
-
-## Producción (notas breves)
-
-- Frontend: `cd frontend && npm run build && npm run start` (u orquestación equivalente).
-- Backend: exponer la app FastAPI con el proceso/servidor que uses en tu plataforma.
-- Variables de entorno y secretos deben configurarse en el entorno de despliegue, no en el código.

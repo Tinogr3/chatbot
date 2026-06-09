@@ -1,47 +1,44 @@
 "use client";
 
+/**
+ * UserContext — adaptador de compatibilidad sobre AuthContext.
+ *
+ * Expone la misma interfaz que antes (sessionId, username, login, logout…)
+ * pero ahora el `sessionId` y el `username` provienen del JWT autenticado,
+ * no del string libre introducido por el usuario.
+ *
+ * `login` y `logout` delegan en AuthContext.
+ */
+
 import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useState,
 } from "react";
+import { useAuth } from "@/context/AuthContext";
 import { dictionaries } from "@/locales";
 
-const SESSION_STORAGE_KEY = "cotutor_session_id";
-
-function normalizeSessionId(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-    .replace(/[^a-z0-9_-]/g, "");
+function formatUsername(username: string): string {
+  const words = username.split(/[_-]+/).filter(Boolean);
+  return words
+    .map((word) => {
+      if (/[a-zA-Z]/.test(word)) {
+        const lower = word.toLowerCase();
+        return `${lower.charAt(0).toUpperCase()}${lower.slice(1)}`;
+      }
+      return word;
+    })
+    .join(" ")
+    .trim();
 }
 
-function formatUsername(sessionId: string): string {
-  const words = sessionId.split(/[_-]+/).filter(Boolean);
-  const formatted = words.map((word) => {
-    // Si el segmento tiene letras, lo "titulamos". Si solo son dígitos, lo dejamos igual.
-    if (/[a-zA-Z]/.test(word)) {
-      const lower = word.toLowerCase();
-      return `${lower.charAt(0).toUpperCase()}${lower.slice(1)}`;
-    }
-    return word;
-  });
-
-  return formatted.join(" ").trim();
-}
-
-function computeUserInitials(sessionId: string): string {
-  const words = sessionId.split(/[_-]+/).filter(Boolean);
-
+function computeUserInitials(username: string): string {
+  const words = username.split(/[_-]+/).filter(Boolean);
   if (words.length === 1) {
     const letters = words[0].match(/[a-zA-Z]/g) ?? [];
     return letters.slice(0, 2).join("").toUpperCase();
   }
-
   const initials: string[] = [];
   for (const word of words) {
     const match = word.match(/[a-zA-Z]/);
@@ -49,7 +46,6 @@ function computeUserInitials(sessionId: string): string {
     initials.push(match[0].toUpperCase());
     if (initials.length >= 2) break;
   }
-
   return initials.join("");
 }
 
@@ -58,6 +54,7 @@ export type UserContextValue = {
   username: string;
   userInitials: string;
   isHydrated: boolean;
+  /** @deprecated usar useAuth().login directamente */
   login: (id: string) => void;
   logout: () => void;
 };
@@ -65,56 +62,30 @@ export type UserContextValue = {
 const UserContext = createContext<UserContextValue | undefined>(undefined);
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [isHydrated, setIsHydrated] = useState(false);
+  const { user, isHydrated, logout: authLogout } = useAuth();
 
-  useEffect(() => {
-    const stored = sessionStorage.getItem(SESSION_STORAGE_KEY);
-    const normalized = stored ? normalizeSessionId(stored) : "";
-    queueMicrotask(() => {
-      setSessionId(normalized.length > 0 ? normalized : null);
-      setIsHydrated(true);
-    });
-  }, []);
+  const sessionId = user?.username ?? null;
 
-  const login = useCallback((id: string) => {
-    const normalized = normalizeSessionId(id);
-    if (normalized.length === 0) {
-      throw new Error(dictionaries.errors.invalidSessionId);
-    }
+  const username = useMemo(
+    () => (sessionId ? formatUsername(sessionId) : ""),
+    [sessionId]
+  );
 
-    setSessionId(normalized);
-    if (typeof window !== "undefined") {
-      sessionStorage.setItem(SESSION_STORAGE_KEY, normalized);
-    }
+  const userInitials = useMemo(
+    () => (sessionId ? computeUserInitials(sessionId) : ""),
+    [sessionId]
+  );
+
+  const login = useCallback((_id: string) => {
+    // No-op: el login real ocurre en WelcomeScreen → AuthContext.login
   }, []);
 
   const logout = useCallback(() => {
-    setSessionId(null);
-    if (typeof window !== "undefined") {
-      sessionStorage.removeItem(SESSION_STORAGE_KEY);
-    }
-  }, []);
-
-  const username = useMemo(() => {
-    if (!sessionId) return "";
-    return formatUsername(sessionId);
-  }, [sessionId]);
-
-  const userInitials = useMemo(() => {
-    if (!sessionId) return "";
-    return computeUserInitials(sessionId);
-  }, [sessionId]);
+    authLogout();
+  }, [authLogout]);
 
   const value = useMemo<UserContextValue>(
-    () => ({
-      sessionId,
-      username,
-      userInitials,
-      isHydrated,
-      login,
-      logout,
-    }),
+    () => ({ sessionId, username, userInitials, isHydrated, login, logout }),
     [sessionId, username, userInitials, isHydrated, login, logout]
   );
 
@@ -128,4 +99,3 @@ export function useUser(): UserContextValue {
   }
   return ctx;
 }
-

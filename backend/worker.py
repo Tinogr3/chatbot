@@ -1,24 +1,20 @@
-"""
-Worker Celery - Procesamiento asíncrono de videos (YouTube/Whisper) y PDFs.
-Broker y backend: Redis. Ejecutar: celery -A worker worker --loglevel=info
-"""
-import logging
 import os
 import sys
 import tempfile
 import base64
 from typing import Any, Dict, List, Optional
 
-# Asegurar path del backend
-if __name__ == "__main__" or os.path.basename(os.getcwd()) != "backend":
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    if backend_dir not in sys.path:
-        sys.path.insert(0, backend_dir)
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+# Asegura imports "planos" (ej. `from session_ids import ...`) dentro de Celery,
+# independientemente del `cwd` con el que arranque el worker.
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from celery import Celery
 from celery.result import AsyncResult
 
-# Configuración desde entorno (por defecto Redis local)
+from logger import get_logger
+
 REDIS_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 
 app = Celery(
@@ -36,7 +32,7 @@ app.conf.update(
     enable_utc=True,
 )
 
-logger = logging.getLogger("worker")
+logger = get_logger("worker")
 
 
 @app.task(bind=True, name="worker.process_video_task")
@@ -45,9 +41,6 @@ def process_video_task(
     url: str,
     session_id: str,
 ) -> Dict[str, Any]:
-    """
-    Tarea asíncrona: descarga/transcribe video YouTube y añade documentos al vector store.
-    """
     from session_ids import normalize_session_id
 
     session_id = normalize_session_id(session_id)
@@ -55,9 +48,8 @@ def process_video_task(
     try:
         self.update_state(state="PROGRESS", meta={"progress": 0.05, "message": "Iniciando procesamiento del video..."})
         from api.chat import invalidate_agent_cache
-        from document_registry import load_document_registry, save_document_registry
         from exceptions import VideoTranscriptionError
-        from media_processor import extract_video_id, process_video as do_process_video
+        from media_processor import extract_video_id, get_video_title, process_video as do_process_video
         from rag_engine import initialize_vector_store
     except Exception as e:
         return {"success": False, "error": str(e), "document_count": 0}
@@ -80,11 +72,52 @@ def process_video_task(
 
         invalidate_agent_cache(session_id)
         video_id = extract_video_id(url)
+
+        # Obtener el título del video (sin descarga completa).
+        self.update_state(state="PROGRESS", meta={"progress": 0.75, "message": "Obteniendo título del video..."})
+        video_title = get_video_title(video_id) or url
+
+        # Registrar el video en el document_registry para que el agente RAG
+        # pueda crear una herramienta de búsqueda dedicada a este video.
+        try:
+            from document_registry import load_document_registry, save_document_registry
+
+            registry = load_document_registry(session_id)
+            registry[url] = {
+                "usage_guide": f"Usa esta herramienta para buscar información en el video de YouTube '{video_title}'. URL: {url}",
+                "type": "video",
+                "video_id": video_id,
+                "title": video_title,
+            }
+            save_document_registry(session_id, registry)
+        except Exception as e:
+            logger.warning("Error guardando video en document_registry: %s", e)
+
+        # Extraer y persistir competencias a partir de la transcripción del video.
+        self.update_state(state="PROGRESS", meta={"progress": 0.9, "message": "Extrayendo competencias del video..."})
+        try:
+            from rag_engine import extract_document_competencies, save_extracted_competencies
+            import asyncio as _asyncio
+
+            full_text = "\n".join(doc.page_content for doc in documents)[:60000]
+            if full_text.strip():
+                tree = extract_document_competencies(full_text)
+                if tree:
+                    # Usamos video_id (no la URL) como document_id canónico en BD.
+                    # La URL puede tener variantes (youtu.be vs youtube.com/watch?v=…)
+                    # mientras que el video_id de 11 chars es siempre único y estable.
+                    _asyncio.run(save_extracted_competencies(tree, video_id))
+                else:
+                    logger.warning("No se pudieron extraer competencias (LLM) para el video '%s'", url)
+        except Exception as e:
+            logger.warning("Error en extracción de competencias para video '%s': %s", url, e)
+
         return {
             "success": True,
             "document_count": len(documents),
             "video_id": video_id,
-            "message": "Video procesado correctamente.",
+            "title": video_title,
+            "message": f"Video '{video_title}' procesado correctamente.",
         }
     except VideoTranscriptionError as e:
         return {"success": False, "error": e.message, "document_count": 0}
@@ -214,7 +247,7 @@ def process_cloud_pdfs_task(
 
     # Imports locales para evitar ciclos y mantener carga inicial baja.
     from api.chat import invalidate_agent_cache
-    from document_registry import save_document_registry
+    from document_registry import load_document_registry, save_document_registry
     from gcs_utils import procesar_todos_pdfs_nube
     from rag_engine import initialize_vector_store
 
@@ -225,7 +258,7 @@ def process_cloud_pdfs_task(
         mapped_progress = max(0.0, min(0.75, progress * 0.75))
         self.update_state(state="PROGRESS", meta={"progress": mapped_progress, "message": message})
 
-    documents, filenames, registry, error_message = procesar_todos_pdfs_nube(
+    documents, filenames, pdf_registry, error_message = procesar_todos_pdfs_nube(
         session_id=session_id,
         progress_callback=progress_callback,
     )
@@ -238,7 +271,10 @@ def process_cloud_pdfs_task(
     # En la lógica original el endpoint también guarda el registro y actualiza el vector store.
     self.update_state(state="PROGRESS", meta={"progress": 0.8, "message": "Actualizando vector store..."})
 
-    save_document_registry(session_id, registry)
+    # Preservar entradas existentes (videos, otros PDFs) y fusionar con las nuevas.
+    existing_registry = load_document_registry(session_id)
+    merged_registry = {**existing_registry, **pdf_registry}
+    save_document_registry(session_id, merged_registry)
     existing_vs = initialize_vector_store(documents=None, session_id=session_id)
     vector_store = initialize_vector_store(
         documents=documents,

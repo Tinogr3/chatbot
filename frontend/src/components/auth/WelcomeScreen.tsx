@@ -1,46 +1,304 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Sparkles } from "lucide-react";
-import { useUser } from "@/context/UserContext";
+import { Eye, EyeOff, Sparkles } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 import { dictionaries } from "@/locales";
 
-const SESSION_FIELD_NAME = "sessionId" as const;
+type Mode = "login" | "register";
 
-const t = dictionaries.welcomeScreen;
-const tErrors = dictionaries.errors;
+const tL = dictionaries.authScreen.login;
+const tR = dictionaries.authScreen.register;
 
-function getSessionIdFromForm(form: HTMLFormElement): string {
-  const formData = new FormData(form);
-  const raw = formData.get(SESSION_FIELD_NAME);
-  if (typeof raw !== "string") {
-    return "";
-  }
-  return raw.trim();
+// ---------------------------------------------------------------------------
+// Campo con botón de mostrar/ocultar contraseña
+// ---------------------------------------------------------------------------
+function PasswordField({
+  id,
+  name,
+  placeholder,
+  label,
+  autoComplete,
+  value,
+  onChange,
+  describedBy,
+  invalid,
+}: {
+  id: string;
+  name: string;
+  placeholder: string;
+  label: string;
+  autoComplete: string;
+  value: string;
+  onChange: (v: string) => void;
+  describedBy?: string;
+  invalid?: boolean;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative">
+      <span className="sr-only">
+        <label htmlFor={id}>{label}</label>
+      </span>
+      <input
+        id={id}
+        name={name}
+        type={visible ? "text" : "password"}
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+        required
+        aria-required="true"
+        aria-invalid={invalid ? "true" : "false"}
+        aria-describedby={describedBy}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-4 py-3 pr-11 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
+      />
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        aria-label={visible ? "Ocultar contraseña" : "Mostrar contraseña"}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+      >
+        {visible ? (
+          <EyeOff className="w-4 h-4" aria-hidden />
+        ) : (
+          <Eye className="w-4 h-4" aria-hidden />
+        )}
+      </button>
+    </div>
+  );
 }
 
-export function WelcomeScreen() {
-  const { login } = useUser();
+// ---------------------------------------------------------------------------
+// Pantalla de login
+// ---------------------------------------------------------------------------
+function LoginForm({ onSwitchToRegister }: { onSwitchToRegister: () => void }) {
+  const { login } = useAuth();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-    const value = getSessionIdFromForm(event.currentTarget);
+  const errorId = "login-error";
 
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
     try {
-      login(value);
-      setError(null);
+      await login(username.trim().toLowerCase(), password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : tErrors.welcomeFallback);
+      setError(err instanceof Error ? err.message : tL.submitButton);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const errorId = "welcome-session-error";
-  const hintId = "welcome-session-hint";
-  const titleId = "welcome-title";
-  const inputDescribedBy = error
-    ? `${hintId} ${errorId}`
-    : hintId;
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-3"
+      aria-label={tL.formAriaLabel}
+      noValidate
+    >
+      <div>
+        <span className="sr-only">
+          <label htmlFor="login-username">{tL.usernameLabel}</label>
+        </span>
+        <input
+          id="login-username"
+          type="text"
+          name="username"
+          autoComplete="username"
+          placeholder={tL.usernamePlaceholder}
+          required
+          aria-required="true"
+          aria-invalid={error ? "true" : "false"}
+          aria-describedby={error ? errorId : undefined}
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
+        />
+      </div>
+
+      <PasswordField
+        id="login-password"
+        name="password"
+        placeholder={tL.passwordPlaceholder}
+        label={tL.passwordLabel}
+        autoComplete="current-password"
+        value={password}
+        onChange={setPassword}
+        describedBy={error ? errorId : undefined}
+        invalid={!!error}
+      />
+
+      {error && (
+        <div
+          id={errorId}
+          role="alert"
+          aria-live="polite"
+          className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-200 px-3 py-2 text-xs"
+        >
+          {error}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={loading}
+        aria-label={tL.submitAriaLabel}
+        className="w-full py-3 rounded-xl bg-emerald-500 text-white font-semibold text-sm hover:bg-emerald-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {loading ? "Entrando…" : tL.submitButton}
+      </button>
+
+      <button
+        type="button"
+        onClick={onSwitchToRegister}
+        className="w-full text-center text-xs text-emerald-600 dark:text-emerald-400 hover:underline pt-1"
+      >
+        {tL.registerLink}
+      </button>
+
+      <p className="text-gray-400 dark:text-gray-500 text-xs text-center">
+        {tL.forgotHint}
+      </p>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pantalla de registro
+// ---------------------------------------------------------------------------
+function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void }) {
+  const { register } = useAuth();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const errorId = "register-error";
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError(null);
+
+    if (password !== confirmPassword) {
+      setError(tR.passwordMismatch);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await register(username.trim().toLowerCase(), password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al crear la cuenta.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-3"
+      aria-label={tR.formAriaLabel}
+      noValidate
+    >
+      <div>
+        <span className="sr-only">
+          <label htmlFor="reg-username">{tR.usernameLabel}</label>
+        </span>
+        <input
+          id="reg-username"
+          type="text"
+          name="username"
+          autoComplete="username"
+          placeholder={tR.usernamePlaceholder}
+          required
+          aria-required="true"
+          aria-invalid={error ? "true" : "false"}
+          aria-describedby={`reg-username-hint${error ? ` ${errorId}` : ""}`}
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
+        />
+        <p id="reg-username-hint" className="mt-1 text-xs text-gray-400 dark:text-gray-500 pl-1">
+          {tR.usernameHint}
+        </p>
+      </div>
+
+      <div>
+        <PasswordField
+          id="reg-password"
+          name="password"
+          placeholder={tR.passwordPlaceholder}
+          label={tR.passwordLabel}
+          autoComplete="new-password"
+          value={password}
+          onChange={setPassword}
+          describedBy={`reg-password-hint${error ? ` ${errorId}` : ""}`}
+          invalid={!!error}
+        />
+        <p id="reg-password-hint" className="mt-1 text-xs text-gray-400 dark:text-gray-500 pl-1">
+          {tR.passwordHint}
+        </p>
+      </div>
+
+      <PasswordField
+        id="reg-confirm-password"
+        name="confirmPassword"
+        placeholder={tR.confirmPasswordPlaceholder}
+        label={tR.confirmPasswordLabel}
+        autoComplete="new-password"
+        value={confirmPassword}
+        onChange={setConfirmPassword}
+        describedBy={error ? errorId : undefined}
+        invalid={!!error}
+      />
+
+      {error && (
+        <div
+          id={errorId}
+          role="alert"
+          aria-live="polite"
+          className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-200 px-3 py-2 text-xs"
+        >
+          {error}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={loading}
+        aria-label={tR.submitAriaLabel}
+        className="w-full py-3 rounded-xl bg-emerald-500 text-white font-semibold text-sm hover:bg-emerald-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {loading ? "Creando cuenta…" : tR.submitButton}
+      </button>
+
+      <button
+        type="button"
+        onClick={onSwitchToLogin}
+        className="w-full text-center text-xs text-emerald-600 dark:text-emerald-400 hover:underline pt-1"
+      >
+        {tR.loginLink}
+      </button>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Componente principal
+// ---------------------------------------------------------------------------
+export function WelcomeScreen() {
+  const [mode, setMode] = useState<Mode>("login");
+  const titleId = "auth-title";
+
+  const t = mode === "login" ? tL : tR;
 
   return (
     <div
@@ -49,65 +307,30 @@ export function WelcomeScreen() {
       aria-labelledby={titleId}
     >
       <div className="bg-white dark:bg-gray-900 shadow-xl rounded-2xl p-8 w-full max-w-md border border-gray-100 dark:border-gray-800">
+        {/* Logo */}
         <div className="flex justify-center mb-6" aria-hidden="true">
           <div className="p-3 rounded-xl bg-emerald-500 text-white">
-            <Sparkles className="w-10 h-10" aria-hidden="true" focusable="false" />
+            <Sparkles className="w-10 h-10" aria-hidden focusable="false" />
           </div>
         </div>
+
+        {/* Título dinámico */}
         <h1
           id={titleId}
-          className="text-2xl font-bold text-gray-800 dark:text-gray-100 text-center mb-2"
+          className="text-2xl font-bold text-gray-800 dark:text-gray-100 text-center mb-1"
         >
           {t.title}
         </h1>
         <p className="text-gray-500 dark:text-gray-400 text-center text-sm mb-6">
           {t.subtitle}
         </p>
-        <form
-          onSubmit={handleSubmit}
-          className="space-y-4"
-          aria-label={t.formAriaLabel}
-          noValidate
-        >
-          <label htmlFor={SESSION_FIELD_NAME} className="block">
-            <span className="sr-only">{t.inputLabel}</span>
-            <input
-              id={SESSION_FIELD_NAME}
-              type="text"
-              name={SESSION_FIELD_NAME}
-              placeholder={t.inputPlaceholder}
-              autoComplete="username"
-              required
-              aria-required="true"
-              aria-invalid={error ? "true" : "false"}
-              aria-describedby={inputDescribedBy}
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
-            />
-          </label>
-          {error && (
-            <div
-              id={errorId}
-              role="alert"
-              aria-live="polite"
-              className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-200 px-3 py-2 text-xs"
-            >
-              {error}
-            </div>
-          )}
-          <button
-            type="submit"
-            aria-label={t.submitAriaLabel}
-            className="w-full py-3 rounded-xl bg-emerald-500 text-white font-semibold text-sm hover:bg-emerald-600 transition-colors"
-          >
-            {t.submitButton}
-          </button>
-        </form>
-        <p
-          id={hintId}
-          className="text-gray-400 dark:text-gray-500 text-xs text-center mt-4"
-        >
-          {t.hint}
-        </p>
+
+        {/* Formulario según modo */}
+        {mode === "login" ? (
+          <LoginForm onSwitchToRegister={() => setMode("register")} />
+        ) : (
+          <RegisterForm onSwitchToLogin={() => setMode("login")} />
+        )}
       </div>
     </div>
   );

@@ -309,98 +309,137 @@ def _slug_for_competency_compare(label: str) -> str:
 
 
 def _sanitize_extracted_competency_tree(tree: "ExtractedCompetencyTree") -> "ExtractedCompetencyTree":
-    """Evita etiquetas duplicadas y descripciones de resultado idénticas entre subcompetencias."""
+    """Evita etiquetas duplicadas y resultados de aprendizaje idénticos entre subcompetencias."""
     from schemas import ExtractedCompetencyTree, ExtractedLearningOutcome, ExtractedSubcompetency
 
     main_name = " ".join((tree.competency_name or "").split())
-    seen: set[str] = {_slug_for_competency_compare(main_name)}
+    seen_names: set[str] = {_slug_for_competency_compare(main_name)}
     new_subs: list[ExtractedSubcompetency] = []
 
     for i, sub in enumerate(tree.subcompetencies):
+        # Desduplicar nombre de la subcompetencia
         original = (sub.name or "").strip()
         name = " ".join(original.split())
         slug = _slug_for_competency_compare(name)
         counter = 2
-        while not slug or slug in seen:
+        while not slug or slug in seen_names:
             name = f"{original or f'Ámbito {i + 1}'} — faceta {counter}"
             slug = _slug_for_competency_compare(name)
             counter += 1
-        seen.add(slug)
-        desc = " ".join((sub.learning_outcomes[0].description or "").split())
-        new_subs.append(
-            ExtractedSubcompetency(
-                name=name,
-                learning_outcomes=[ExtractedLearningOutcome(description=desc)],
-            )
-        )
+        seen_names.add(slug)
 
-    if (
-        len(new_subs) == 2
-        and _slug_for_competency_compare(new_subs[0].learning_outcomes[0].description)
-        == _slug_for_competency_compare(new_subs[1].learning_outcomes[0].description)
-    ):
-        d1 = new_subs[1].learning_outcomes[0].description
-        d1_unique = (
-            f"{d1.rstrip('. ')}. Debe demostrarse aplicando el criterio a «{new_subs[1].name}»."
+        # Normalizar y desduplicar los resultados de aprendizaje de esta subcompetencia
+        seen_lo: set[str] = set()
+        clean_los: list[ExtractedLearningOutcome] = []
+        for lo in sub.learning_outcomes:
+            desc = " ".join((lo.description or "").split())
+            desc_slug = _slug_for_competency_compare(desc)
+            if not desc or desc_slug in seen_lo:
+                continue
+            seen_lo.add(desc_slug)
+            clean_los.append(ExtractedLearningOutcome(description=desc))
+
+        # Garantizar al menos un resultado de aprendizaje válido
+        if not clean_los:
+            fallback = f"Aplicar correctamente los conceptos de «{name}» en un caso práctico."
+            clean_los = [ExtractedLearningOutcome(description=fallback)]
+
+        new_subs.append(ExtractedSubcompetency(name=name, learning_outcomes=clean_los))
+
+    # Garantizar al menos una subcompetencia válida
+    if not new_subs:
+        fallback_lo = ExtractedLearningOutcome(
+            description=f"Demostrar comprensión y aplicación práctica de «{main_name}»."
         )
-        new_subs[1] = ExtractedSubcompetency(
-            name=new_subs[1].name,
-            learning_outcomes=[ExtractedLearningOutcome(description=d1_unique)],
-        )
+        new_subs = [ExtractedSubcompetency(name=f"Fundamentos de {main_name}", learning_outcomes=[fallback_lo])]
 
     return ExtractedCompetencyTree(competency_name=main_name, subcompetencies=new_subs)
 
 
 def extract_document_competencies(text: str) -> Optional["ExtractedCompetencyTree"]:
-    """Extrae competencias prácticas y evaluables (1 competencia, 2 subcompetencias, 2 resultados)."""
+    """Extrae entre 3 y 5 subcompetencias específicas y evaluables del documento.
+
+    Reintenta hasta 3 veces con temperaturas crecientes para maximizar la probabilidad
+    de obtener al menos una competencia válida por documento.
+    """
     from schemas import ExtractedCompetencyTree
 
     truncated = text[:60000] if len(text) > 60000 else text
     prompt = (
-        "Eres diseñador instruccional senior. A partir del TEXTO del documento (no inventes fuera de él), "
-        "define competencias útiles en el trabajo real que ese contenido habilita.\n\n"
-        "REQUISITOS ESTRICTOS:\n"
-        "• La competencia principal debe nombrar un ámbito CONCRETO del documento (norma, proceso, "
-        "herramienta, caso o rol). Prohibido dejarla en frases vacías tipo 'competencias generales', "
-        "'desarrollo integral', 'comprensión global' o 'conocimientos básicos' sin objeto.\n"
-        "• Las DOS subcompetencias deben ser ORTOGONALES: facetas distintas (p. ej. interpretación vs "
-        "aplicación, análisis vs verificación, planificación vs comunicación). No repitas la misma idea "
-        "con distintas palabras.\n"
-        "• Cada resultado de aprendizaje debe ser OBSERVABLE y EVALUABLE: verbo de acción + qué produce "
-        "o hace el estudiante + criterio o evidencia verificable (puede calificarse sí/no o con rúbrica corta). "
-        "Evita 'comprender', 'sensibilizarse', 'valorar' sin indicar evidencia observable.\n"
-        "• Redacta en español. Usa términos que aparezcan o se deduzcan claramente del texto.\n"
-        "• No dupliques nombres entre competencia principal y subcompetencias ni entre las dos subcompetencias.\n\n"
-        "Devuelve exactamente la estructura pedida (2 subcompetencias, cada una con un solo learning outcome).\n\n"
-        f"TEXTO DEL DOCUMENTO:\n---\n{truncated}\n---"
+        "Eres diseñador instruccional senior especializado en diseño curricular por competencias. "
+        "A partir del TEXTO del documento (no inventes contenido fuera de él), "
+        "extrae las competencias prácticas y evaluables que ese contenido habilita.\n\n"
+        "ESTRUCTURA REQUERIDA:\n"
+        "• Una competencia principal que nombre el ámbito concreto del documento "
+        "(proceso, norma, herramienta, disciplina, caso o rol específico). "
+        "PROHIBIDO: frases genéricas como 'competencias generales', 'desarrollo integral', "
+        "'comprensión global' o 'conocimientos básicos' sin objeto concreto.\n"
+        "• Entre 3 y 5 subcompetencias ESPECÍFICAS Y ORTOGONALES que cubran dimensiones distintas "
+        "del documento, por ejemplo: conceptual, procedimental, analítico, aplicado, crítico-evaluativo. "
+        "Cada subcompetencia debe corresponder a un tema, habilidad o área reconocible en el texto. "
+        "NO repitas la misma idea con distintas palabras.\n"
+        "• Por cada subcompetencia, 2 resultados de aprendizaje OBSERVABLES Y EVALUABLES:\n"
+        "  1. Resultado conceptual/analítico: demostrar que el estudiante entiende el 'por qué'.\n"
+        "  2. Resultado práctico/aplicado: demostrar que el estudiante puede hacer/producir algo concreto.\n"
+        "• Cada resultado debe tener: verbo de acción + objeto específico del texto + criterio verificable. "
+        "EVITA: 'comprender', 'conocer', 'sensibilizarse', 'valorar' sin evidencia observable concreta.\n"
+        "• Redacta en español. Usa terminología que aparezca explícitamente en el texto.\n"
+        "• No dupliques nombres entre la competencia principal y las subcompetencias.\n\n"
+        "TEXTO DEL DOCUMENTO:\n"
+        "---\n"
+        f"{truncated}\n"
+        "---\n\n"
+        "Devuelve la estructura JSON con competency_name y la lista subcompetencies (3-5 elementos), "
+        "cada una con name y learning_outcomes (2 elementos)."
     )
-    try:
-        api_key = os.getenv("GOOGLE_API_KEY")
-        flash_model = gemini_flash_model_id()
-        if api_key:
-            llm = ChatGoogleGenerativeAI(
-                model=flash_model, google_api_key=api_key, temperature=0
-            )
-        else:
+
+    api_key = os.getenv("GOOGLE_API_KEY")
+    flash_model = gemini_flash_model_id()
+
+    def _build_llm(temperature: float) -> Optional[ChatGoogleGenerativeAI]:
+        try:
+            if api_key:
+                return ChatGoogleGenerativeAI(
+                    model=flash_model, google_api_key=api_key, temperature=temperature
+                )
             credentials, project_id = get_credentials_and_project()
             if not credentials or not project_id:
                 logger.warning("extract_document_competencies: sin credenciales LLM disponibles")
                 return None
-            llm = ChatGoogleGenerativeAI(
+            return ChatGoogleGenerativeAI(
                 model=flash_model,
                 credentials=credentials,
                 project=project_id,
                 location="global",
-                temperature=0,
+                temperature=temperature,
             )
-        structured_llm = llm.with_structured_output(ExtractedCompetencyTree)
-        result = structured_llm.invoke(prompt)
-        if not result:
+        except Exception as e:
+            logger.warning("Error inicializando LLM para extracción de competencias: %s", e)
             return None
-        return _sanitize_extracted_competency_tree(result)
-    except Exception as e:
-        logger.warning("Error extrayendo competencias del documento: %s", e)
-        return None
+
+    # Reintentar con temperaturas crecientes para maximizar la probabilidad de éxito
+    for attempt, temperature in enumerate([0, 0.3, 0.6], start=1):
+        llm = _build_llm(temperature)
+        if not llm:
+            break
+        try:
+            structured_llm = llm.with_structured_output(ExtractedCompetencyTree)
+            result = structured_llm.invoke(prompt)
+            if result:
+                sanitized = _sanitize_extracted_competency_tree(result)
+                if sanitized and sanitized.subcompetencies:
+                    return sanitized
+                logger.warning(
+                    "Intento %d: árbol sanitizado sin subcompetencias válidas", attempt
+                )
+        except Exception as e:
+            logger.warning(
+                "Intento %d/%d: error extrayendo competencias (temp=%.1f): %s",
+                attempt, 3, temperature, e,
+            )
+
+    logger.warning("extract_document_competencies: fallidos los 3 intentos, retornando None")
+    return None
 
 
 async def save_extracted_competencies(
@@ -444,11 +483,13 @@ async def save_extracted_competencies(
             session.add(sub)
             await session.flush()
 
+            n_outcomes = len(sub_data.learning_outcomes)
+            per_outcome_weight = round(1.0 / n_outcomes, 4) if n_outcomes > 0 else 1.0
             for lo_data in sub_data.learning_outcomes:
                 lo = LearningOutcome(
                     subcompetency_id=sub.id,
                     description=lo_data.description,
-                    weight=1.0,
+                    weight=per_outcome_weight,
                 )
                 session.add(lo)
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileQuestion, MessageSquare, Mic, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { useAuth } from "@/context/AuthContext";
 import { useProjects } from "@/context/ProjectsContext";
 import {
   createPodcastAudio,
@@ -68,6 +69,7 @@ function LargeModal({ title, onClose, children, titleId = "discovery-modal-title
 }
 
 export default function DiscoveryHubSection() {
+  const { accessToken } = useAuth();
   const { effectiveSessionId } = useProjects();
   const [stats, setStats] = useState<DiscoveryStats>({ summaries: 0, exams: 0 });
   const [summariesOpen, setSummariesOpen] = useState(false);
@@ -88,7 +90,7 @@ export default function DiscoveryHubSection() {
   const refreshStats = useCallback(async () => {
     if (!effectiveSessionId) return;
     try {
-      const s = await getDiscoveryStats(effectiveSessionId);
+      const s = await getDiscoveryStats(effectiveSessionId, accessToken);
       setStats(s);
     } catch {
       setStats({ summaries: 0, exams: 0 });
@@ -124,7 +126,7 @@ export default function DiscoveryHubSection() {
     setSummariesOpen(true);
     setSummariesLoading(true);
     try {
-      const list = await getDiscoverySummaries(effectiveSessionId);
+      const list = await getDiscoverySummaries(effectiveSessionId, accessToken);
       setSummariesList(list);
       await refreshStats();
     } finally {
@@ -137,7 +139,7 @@ export default function DiscoveryHubSection() {
     setExamsOpen(true);
     setExamsLoading(true);
     try {
-      const list = await getDiscoveryExams(effectiveSessionId);
+      const list = await getDiscoveryExams(effectiveSessionId, accessToken);
       setExamsList(list);
       await refreshStats();
     } finally {
@@ -155,7 +157,7 @@ export default function DiscoveryHubSection() {
     setPodcastPickLoading(true);
     setAudioError(null);
     try {
-      const list = await getDiscoverySummaries(effectiveSessionId);
+      const list = await getDiscoverySummaries(effectiveSessionId, accessToken);
       const asc = [...list].sort(
         (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
       );
@@ -205,7 +207,7 @@ export default function DiscoveryHubSection() {
     const ac = new AbortController();
     audioAbortRef.current = ac;
     try {
-      const blob = await createPodcastAudio(effectiveSessionId, ids, { signal: ac.signal });
+      const blob = await createPodcastAudio(effectiveSessionId, ids, { signal: ac.signal, accessToken });
       setAudioBlobUrl(URL.createObjectURL(blob));
       setPodcastModalOpen(false);
     } catch (e) {

@@ -2,18 +2,15 @@
 
 Cliente web del proyecto de chat / RAG educativo.
 
-## Documentación y arranque
+Para la guía completa de arranque, variables de entorno y despliegue con Docker consulta **[README.md](../README.md)**.
 
-- Guía principal del repositorio (entorno, `./run.sh`, variables): **[README.md](../README.md)**
-- Arquitectura y API: **[ARQUITECTURA.md](../ARQUITECTURA.md)**
+## Desarrollo local sin Docker
 
-## Solo frontend en desarrollo
-
-Desde esta carpeta, con Node.js instalado:
+Requiere Node.js 20+.
 
 ```bash
 npm ci
-npm run dev
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8000 npm run dev
 ```
 
-La URL del backend en el navegador se configura con **`NEXT_PUBLIC_BACKEND_URL`** (por defecto suele ser `http://localhost:8000`).
+El backend debe estar corriendo y accesible en la URL indicada. La app queda disponible en <http://localhost:3000>.

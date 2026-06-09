@@ -29,6 +29,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from auth import get_validated_session
 from database import get_db
 from evaluation_engine import EvaluationService
 from logger import get_logger
@@ -197,23 +198,17 @@ async def record_learning_progress(
 )
 async def evaluate(
     body: EvaluateLearningRequest,
+    session_id: str = Depends(get_validated_session),
     db: AsyncSession = Depends(get_db),
 ) -> EvaluateLearningResponse:
     """Evalúa la respuesta de un estudiante y persiste la evidencia + progreso.
 
     Errores HTTP:
-      * 400 si `session_id` queda vacío tras normalizar.
+      * 401/403 si el token JWT es inválido o el session_id no pertenece al usuario.
       * 404 si el `learning_outcome_id` no existe.
       * 502 si el LLM evaluador no está disponible (credenciales/red).
       * 500 ante errores inesperados de BD o evaluación.
     """
-    session_id = body.session_id.strip().lower().replace(" ", "_")
-    if not session_id:
-        raise HTTPException(
-            status_code=400,
-            detail="session_id no puede estar vacío.",
-        )
-
     # 1. Validar que el outcome existe (para producir 404 antes del LLM)
     try:
         outcome_check = await db.execute(

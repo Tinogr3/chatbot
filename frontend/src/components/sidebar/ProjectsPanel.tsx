@@ -47,6 +47,8 @@ export default function ProjectsPanel({ searchQuery }: ProjectsPanelProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState<string>("");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  // IDs de documentos cuyo nombre está expandido (no truncado)
+  const [expandedDocNames, setExpandedDocNames] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!pendingRenameProjectId) return;
@@ -108,6 +110,18 @@ export default function ProjectsPanel({ searchQuery }: ProjectsPanelProps) {
         next.delete(projectId);
       } else {
         next.add(projectId);
+      }
+      return next;
+    });
+  };
+
+  const toggleDocName = (docId: string) => {
+    setExpandedDocNames((prev) => {
+      const next = new Set(prev);
+      if (next.has(docId)) {
+        next.delete(docId);
+      } else {
+        next.add(docId);
       }
       return next;
     });
@@ -238,19 +252,33 @@ export default function ProjectsPanel({ searchQuery }: ProjectsPanelProps) {
                       <ul className="space-y-0.5">
                         {project.documents.map((doc) => {
                           const Icon = DOCUMENT_ICONS[doc.source];
+                          const isDocNameExpanded = expandedDocNames.has(doc.id);
                           return (
                             <li
                               key={doc.id}
-                              title={doc.name}
-                              className="flex items-center gap-2 pl-7 pr-1 py-1 text-xs text-gray-600 dark:text-gray-300"
+                              className="flex items-start gap-2 pl-7 pr-1 py-1 text-xs text-gray-600 dark:text-gray-300"
                             >
                               <Icon
-                                className="w-3 h-3 shrink-0 text-gray-400 dark:text-gray-500"
+                                className="w-3 h-3 shrink-0 text-gray-400 dark:text-gray-500 mt-0.5"
                                 aria-hidden="true"
                               />
-                              <span className="truncate flex-1 min-w-0">
+                              <button
+                                type="button"
+                                title={isDocNameExpanded ? undefined : doc.name}
+                                aria-label={
+                                  isDocNameExpanded
+                                    ? `Contraer nombre: ${doc.name}`
+                                    : `Ver nombre completo: ${doc.name}`
+                                }
+                                onClick={() => toggleDocName(doc.id)}
+                                className={`flex-1 min-w-0 text-left leading-snug hover:text-gray-900 dark:hover:text-gray-50 ${
+                                  isDocNameExpanded
+                                    ? "break-words whitespace-normal"
+                                    : "truncate"
+                                }`}
+                              >
                                 {doc.name}
-                              </span>
+                              </button>
                             </li>
                           );
                         })}
