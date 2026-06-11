@@ -145,6 +145,114 @@ export interface EvaluateLearningResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Tipos del Módulo Formador (espejo de backend/schemas.py)
+// ---------------------------------------------------------------------------
+
+/** Espejo de `GeneratedLearningUnit` — pesos en % (0-100). */
+export interface GeneratedLearningUnit {
+  name: string;
+  definition: string;
+  weight: number;
+}
+
+/** Espejo de `GeneratedTheme`. */
+export interface GeneratedTheme {
+  name: string;
+  learning_units: GeneratedLearningUnit[];
+}
+
+/** Espejo de `GeneratedItinerary` — respuesta de POST /trainer/generate-itinerary. */
+export interface GeneratedItinerary {
+  title: string;
+  total_weeks: number;
+  hours_per_week: number;
+  themes: GeneratedTheme[];
+}
+
+/** Unidad a guardar — peso como fracción (0.0-1.0). */
+export interface LearningUnitCreate {
+  name: string;
+  definition: string;
+  weight: number;
+  order_index?: number;
+}
+
+export interface ThemeCreate {
+  name: string;
+  order_index?: number;
+  learning_units: LearningUnitCreate[];
+}
+
+/** Espejo de `CourseItineraryCreate` — body de POST /trainer/save-itinerary. */
+export interface CourseItineraryCreate {
+  title: string;
+  total_weeks: number;
+  hours_per_week: number;
+  themes: ThemeCreate[];
+}
+
+/** Espejo de `SaveItineraryResponse`. */
+export interface SaveItineraryResponse {
+  itinerary_id: number;
+  theme_count: number;
+  unit_count: number;
+  message: string;
+}
+
+/** Espejo de `QuadrantUnit` — celda del cuadrante de progreso. */
+export interface QuadrantUnit {
+  unit_id: number;
+  name: string;
+  definition: string;
+  weight: number;
+  score: number;
+  percent_complete: number;
+  color_code: string;
+}
+
+/** Espejo de `QuadrantTheme`. */
+export interface QuadrantTheme {
+  theme_id: number;
+  name: string;
+  units: QuadrantUnit[];
+}
+
+/** Espejo de `QuadrantResponse` — GET /trainer/progress/quadrant. */
+export interface QuadrantResponse {
+  itinerary_id: number;
+  title: string;
+  total_weeks: number;
+  hours_per_week: number;
+  themes: QuadrantTheme[];
+  overall_score: number;
+}
+
+/** Espejo de `StudentActivityLogRead`. */
+export interface StudentActivityLogRead {
+  id: number;
+  session_id: string;
+  learning_unit_id: number;
+  activity_type: "video" | "chat_question" | "quiz";
+  score_earned: number | null;
+  detail: string | null;
+  timestamp: string;
+}
+
+/** Espejo de `UnitDetailsResponse` — GET /trainer/progress/unit-details. */
+export interface UnitDetailsResponse {
+  unit_id: number;
+  unit_name: string;
+  total_score: number;
+  color_code: string;
+  quiz_stats: { count: number; average_score: number | null };
+  video_count: number;
+  chat_question_count: number;
+  quiz_points: number;
+  action_points: number;
+  activities: StudentActivityLogRead[];
+}
+
+// ---------------------------------------------------------------------------
 // Opciones de chat (request body POST /chat)
 // ---------------------------------------------------------------------------
 
@@ -522,4 +630,71 @@ export async function submitEvaluation(
   } catch (e) {
     throw e instanceof Error ? e : new Error(String(e));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Módulo Formador
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /trainer/generate-itinerary — Genera el cuadrante con IA (no persiste).
+ */
+export async function generateItinerary(
+  prompt: string,
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<GeneratedItinerary> {
+  return fetchJson<GeneratedItinerary>(`${BACKEND_URL}/trainer/generate-itinerary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: prompt.trim() }),
+    sessionId,
+    accessToken,
+  });
+}
+
+/**
+ * POST /trainer/save-itinerary — Persiste el cuadrante validado por el formador.
+ */
+export async function saveItinerary(
+  itinerary: CourseItineraryCreate,
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<SaveItineraryResponse> {
+  return fetchJson<SaveItineraryResponse>(`${BACKEND_URL}/trainer/save-itinerary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(itinerary),
+    sessionId,
+    accessToken,
+  });
+}
+
+/**
+ * GET /trainer/progress/quadrant/{session_id} — Matriz de progreso del alumno.
+ */
+export async function getProgressQuadrant(
+  studentSessionId: string,
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<QuadrantResponse> {
+  return fetchJson<QuadrantResponse>(
+    `${BACKEND_URL}/trainer/progress/quadrant/${encodeURIComponent(studentSessionId)}`,
+    { method: "GET", sessionId, accessToken },
+  );
+}
+
+/**
+ * GET /trainer/progress/unit-details/{session_id}/{unit_id} — Drill-down de una celda.
+ */
+export async function getUnitDetails(
+  studentSessionId: string,
+  unitId: number,
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<UnitDetailsResponse> {
+  return fetchJson<UnitDetailsResponse>(
+    `${BACKEND_URL}/trainer/progress/unit-details/${encodeURIComponent(studentSessionId)}/${unitId}`,
+    { method: "GET", sessionId, accessToken },
+  );
 }

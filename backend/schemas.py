@@ -586,6 +586,289 @@ class DashboardCompetencyResponse(BaseModel):
 
 
 # =====================================================================
+# Módulo Formador: itinerarios, unidades de aprendizaje y seguimiento
+# =====================================================================
+
+
+class ActivityTypeEnum(str, Enum):
+    """Tipo de actividad registrada para una unidad de aprendizaje."""
+
+    VIDEO = "video"
+    CHAT_QUESTION = "chat_question"
+    QUIZ = "quiz"
+
+
+# ----- LearningUnit -----
+
+class LearningUnitBase(BaseModel):
+    """Campos compartidos de una unidad de aprendizaje (celda del cuadrante)."""
+
+    name: str = Field(..., min_length=1, max_length=255, description="Nombre del concepto")
+    definition: str = Field(..., min_length=1, description="Descripción del concepto a aprender")
+    weight: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Peso fraccional sobre el itinerario completo (0.0–1.0)",
+    )
+    order_index: int = Field(0, ge=0, description="Posición dentro del tema")
+
+
+class LearningUnitCreate(LearningUnitBase):
+    """Creación de unidad de aprendizaje (anidada en SaveItineraryRequest)."""
+
+
+class LearningUnitUpdate(BaseModel):
+    """Actualización parcial de una unidad de aprendizaje."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    definition: Optional[str] = Field(None, min_length=1)
+    weight: Optional[float] = Field(None, ge=0.0, le=1.0)
+    order_index: Optional[int] = Field(None, ge=0)
+
+
+class LearningUnitRead(LearningUnitBase):
+    """Lectura de unidad de aprendizaje."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(..., description="ID de la unidad")
+    theme_id: int = Field(..., description="ID del tema padre")
+    created_at: datetime
+
+
+# ----- Theme -----
+
+class ThemeBase(BaseModel):
+    """Campos compartidos de un tema del itinerario."""
+
+    name: str = Field(..., min_length=1, max_length=255, description="Nombre del tema")
+    order_index: int = Field(0, ge=0, description="Posición dentro del itinerario")
+
+
+class ThemeCreate(ThemeBase):
+    """Creación de tema con sus unidades anidadas."""
+
+    learning_units: List[LearningUnitCreate] = Field(
+        default_factory=list, description="Unidades de aprendizaje del tema"
+    )
+
+
+class ThemeUpdate(BaseModel):
+    """Actualización parcial de un tema."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    order_index: Optional[int] = Field(None, ge=0)
+
+
+class ThemeRead(ThemeBase):
+    """Lectura de tema con unidades."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    itinerary_id: int
+    learning_units: List[LearningUnitRead] = Field(default_factory=list)
+    created_at: datetime
+
+
+# ----- CourseItinerary -----
+
+class CourseItineraryBase(BaseModel):
+    """Campos compartidos de un itinerario formativo."""
+
+    title: str = Field(..., min_length=1, max_length=255, description="Título del curso")
+    total_weeks: int = Field(..., ge=1, le=104, description="Semanas totales del curso")
+    hours_per_week: float = Field(..., gt=0.0, le=80.0, description="Horas por semana")
+
+
+class CourseItineraryCreate(CourseItineraryBase):
+    """Creación de itinerario completo (con temas y unidades anidados)."""
+
+    themes: List[ThemeCreate] = Field(..., min_length=1, description="Temas del curso")
+
+
+class CourseItineraryUpdate(BaseModel):
+    """Actualización parcial de un itinerario."""
+
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    total_weeks: Optional[int] = Field(None, ge=1, le=104)
+    hours_per_week: Optional[float] = Field(None, gt=0.0, le=80.0)
+
+
+class CourseItineraryRead(CourseItineraryBase):
+    """Lectura de itinerario completo."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    session_id: str
+    themes: List[ThemeRead] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+# ----- StudentActivityLog -----
+
+class StudentActivityLogCreate(BaseModel):
+    """Creación de un registro de actividad del alumno."""
+
+    session_id: str = Field(..., min_length=1, max_length=255)
+    learning_unit_id: int = Field(..., gt=0)
+    activity_type: ActivityTypeEnum = Field(..., description="video | chat_question | quiz")
+    score_earned: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=10.0,
+        description="Nota 0-10 si es quiz; 0.5 por acción; None si no aplica",
+    )
+    detail: Optional[str] = Field(None, description="Contexto opcional de la actividad")
+
+
+class StudentActivityLogRead(BaseModel):
+    """Lectura de un registro de actividad."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    session_id: str
+    learning_unit_id: int
+    activity_type: ActivityTypeEnum
+    score_earned: Optional[float] = None
+    detail: Optional[str] = None
+    timestamp: datetime
+
+
+# ----- UnitProgress -----
+
+class UnitProgressRead(BaseModel):
+    """Lectura del resumen de progreso de una celda."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    session_id: str
+    learning_unit_id: int
+    total_score: float = Field(..., ge=0.0, le=10.0)
+    color_code: str = Field(..., pattern=r"^#[0-9a-fA-F]{6}$")
+    last_updated: datetime
+
+
+# ----- Generación de itinerario con LLM (salida estructurada) -----
+
+class GeneratedLearningUnit(BaseModel):
+    """Unidad de aprendizaje propuesta por el LLM."""
+
+    name: str = Field(..., min_length=1, max_length=255, description="Nombre corto del concepto")
+    definition: str = Field(
+        ...,
+        min_length=1,
+        description="Descripción de qué debe aprender el alumno en esta unidad",
+    )
+    weight: float = Field(
+        ...,
+        ge=0.0,
+        le=100.0,
+        description="Peso porcentual sugerido sobre el total del curso (la suma de todas las unidades debe ser 100)",
+    )
+
+
+class GeneratedTheme(BaseModel):
+    """Tema propuesto por el LLM con sus unidades."""
+
+    name: str = Field(..., min_length=1, max_length=255, description="Nombre del tema")
+    learning_units: List[GeneratedLearningUnit] = Field(
+        ..., min_length=1, description="Unidades de aprendizaje del tema"
+    )
+
+
+class GeneratedItinerary(BaseModel):
+    """Itinerario completo propuesto por el LLM (respuesta de /trainer/generate-itinerary)."""
+
+    title: str = Field(..., min_length=1, max_length=255, description="Título del curso")
+    total_weeks: int = Field(..., ge=1, le=104, description="Semanas totales estimadas")
+    hours_per_week: float = Field(..., gt=0.0, le=80.0, description="Horas semanales estimadas")
+    themes: List[GeneratedTheme] = Field(..., min_length=1, description="Temas del curso")
+
+
+class GenerateItineraryRequest(BaseModel):
+    """Body de POST /trainer/generate-itinerary."""
+
+    prompt: str = Field(
+        ...,
+        min_length=1,
+        description="Petición del formador (ej: 'Curso de Python de 4 semanas, 10h/semana')",
+    )
+
+
+class SaveItineraryResponse(BaseModel):
+    """Respuesta de POST /trainer/save-itinerary."""
+
+    itinerary_id: int = Field(..., description="ID del itinerario guardado")
+    theme_count: int = Field(..., ge=0)
+    unit_count: int = Field(..., ge=0)
+    message: str
+
+
+# ----- Cuadrante de progreso (dashboard formador) -----
+
+class QuadrantUnit(BaseModel):
+    """Celda del cuadrante: unidad con puntuación, % completado y color."""
+
+    unit_id: int
+    name: str
+    definition: str
+    weight: float = Field(..., ge=0.0, le=1.0, description="Peso fraccional en el itinerario")
+    score: float = Field(..., ge=0.0, le=10.0, description="Puntuación actual 0-10")
+    percent_complete: float = Field(
+        ..., ge=0.0, le=100.0, description="Porcentaje completado de la celda (score/10)"
+    )
+    color_code: str = Field(..., description="Color hex para pintar la celda")
+
+
+class QuadrantTheme(BaseModel):
+    """Tema del cuadrante con sus celdas."""
+
+    theme_id: int
+    name: str
+    units: List[QuadrantUnit] = Field(default_factory=list)
+
+
+class QuadrantResponse(BaseModel):
+    """Respuesta de GET /trainer/progress/quadrant/{session_id}."""
+
+    itinerary_id: int
+    title: str
+    total_weeks: int
+    hours_per_week: float
+    themes: List[QuadrantTheme] = Field(default_factory=list)
+    overall_score: float = Field(
+        0.0, ge=0.0, le=10.0, description="Media ponderada por peso de todas las celdas"
+    )
+
+
+class UnitDetailsQuizStats(BaseModel):
+    """Estadísticas de cuestionarios de una celda."""
+
+    count: int = Field(0, ge=0)
+    average_score: Optional[float] = Field(None, ge=0.0, le=10.0)
+
+
+class UnitDetailsResponse(BaseModel):
+    """Respuesta de GET /trainer/progress/unit-details/{session_id}/{unit_id}."""
+
+    unit_id: int
+    unit_name: str
+    total_score: float = Field(..., ge=0.0, le=10.0)
+    color_code: str
+    quiz_stats: UnitDetailsQuizStats
+    video_count: int = Field(0, ge=0)
+    chat_question_count: int = Field(0, ge=0)
+    quiz_points: float = Field(0.0, ge=0.0, le=7.5, description="Puntos aportados por quizzes (máx 7.5)")
+    action_points: float = Field(0.0, ge=0.0, le=2.5, description="Puntos aportados por acciones (máx 2.5)")
+    activities: List[StudentActivityLogRead] = Field(default_factory=list)
+
+
+# =====================================================================
 # Autenticación JWT
 # =====================================================================
 

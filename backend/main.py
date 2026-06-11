@@ -38,6 +38,7 @@ from api.tasks import router as tasks_router
 from api.evaluation import router as evaluation_router
 from api.dashboard import router as dashboard_router
 from api.discovery import router as discovery_router
+from api.trainer import router as trainer_router
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -110,6 +111,7 @@ app.include_router(tasks_router)
 app.include_router(evaluation_router)
 app.include_router(dashboard_router)
 app.include_router(discovery_router)
+app.include_router(trainer_router)
 
 
 @app.get("/health")

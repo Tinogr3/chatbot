@@ -287,6 +287,30 @@ async def evaluate(
             detail="Error guardando la evaluación.",
         ) from exc
 
+    # Módulo Formador (best-effort): registrar el quiz en la celda del cuadrante.
+    # Mapeamos la descripción del learning outcome a la unidad más afín; si no
+    # hay itinerario o no hay match, se omite sin afectar a la respuesta.
+    try:
+        from models import ActivityType
+        from services.progress_service import ProgressService
+
+        unit_id = await ProgressService.find_unit_for_text(
+            db, session_id=session_id, text=description
+        )
+        if unit_id is not None:
+            await ProgressService.log_activity_and_update_progress(
+                db,
+                session_id=session_id,
+                unit_id=unit_id,
+                activity_type=ActivityType.QUIZ,
+                score=score * 10.0,
+                detail=f"Evaluación de learning outcome id={body.learning_outcome_id}",
+            )
+    except Exception:
+        logger.exception(
+            "No se pudo registrar el quiz en el cuadrante (session=%s).", session_id
+        )
+
     return EvaluateLearningResponse(
         score=score,
         feedback=feedback,

@@ -1,12 +1,19 @@
 """
 Modelos SQLAlchemy para el sistema de evaluación por competencias.
 
-Define 5 entidades relacionales:
+Módulo Alumno (sistema original):
 - Competency          (competencia general o específica)
 - Subcompetency       (subcompetencia ligada a una competencia)
 - LearningOutcome     (resultado de aprendizaje con peso ponderado)
 - LearningEvidence    (evidencia de evaluación por sesión)
 - UserCompetencyProgress (progreso agregado por sesión y subcompetencia)
+
+Módulo Formador (itinerarios y seguimiento detallado):
+- CourseItinerary     (planificación: semanas totales, horas/semana)
+- Theme               (tema dentro de un itinerario)
+- LearningUnit        (unidad de aprendizaje / celda con peso porcentual)
+- StudentActivityLog  (histórico de actividades del alumno por unidad)
+- UnitProgress        (resumen de puntuación 0-10 por alumno y unidad)
 """
 from __future__ import annotations
 
@@ -313,3 +320,214 @@ class StoredExam(Base):
 
     def __repr__(self) -> str:
         return f"<StoredExam id={self.id} session={self.session_id!r}>"
+
+
+# ===========================================================================
+# Módulo Formador: itinerarios, unidades de aprendizaje y seguimiento
+# ===========================================================================
+
+
+class ActivityType(str, enum.Enum):
+    """Tipo de actividad registrada en el histórico del alumno."""
+
+    VIDEO = "video"
+    CHAT_QUESTION = "chat_question"
+    QUIZ = "quiz"
+
+
+class CourseItinerary(Base):
+    """Planificación de un curso creada por el formador.
+
+    Una sesión (formador) mantiene un itinerario activo; al guardar uno nuevo
+    se reemplaza el anterior (ver `api/trainer.py`).
+    """
+
+    __tablename__ = "course_itineraries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+        doc="Sesión del formador propietario del itinerario",
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    total_weeks: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
+    hours_per_week: Mapped[float] = mapped_column(Float, nullable=False, default=10.0)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    themes: Mapped[list[Theme]] = relationship(
+        back_populates="itinerary",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="Theme.order_index",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<CourseItinerary id={self.id} title={self.title!r} "
+            f"weeks={self.total_weeks} h/week={self.hours_per_week}>"
+        )
+
+
+class Theme(Base):
+    """Tema (bloque temático) dentro de un itinerario."""
+
+    __tablename__ = "themes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    itinerary_id: Mapped[int] = mapped_column(
+        ForeignKey("course_itineraries.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), nullable=False
+    )
+
+    itinerary: Mapped[CourseItinerary] = relationship(back_populates="themes")
+    learning_units: Mapped[list[LearningUnit]] = relationship(
+        back_populates="theme",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="LearningUnit.order_index",
+    )
+
+    __table_args__ = (Index("ix_themes_itinerary", "itinerary_id"),)
+
+    def __repr__(self) -> str:
+        return f"<Theme id={self.id} name={self.name!r}>"
+
+
+class LearningUnit(Base):
+    """Unidad de aprendizaje (celda del cuadrante) dentro de un tema.
+
+    ``weight`` es la fracción (0.0–1.0) del peso de esta unidad sobre el
+    total del itinerario; la suma de todas las unidades debería ser ≈ 1.0.
+    """
+
+    __tablename__ = "learning_units"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    theme_id: Mapped[int] = mapped_column(
+        ForeignKey("themes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    definition: Mapped[str] = mapped_column(
+        Text, nullable=False, doc="Descripción/definición del concepto a aprender"
+    )
+    weight: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=0.0,
+        doc="Peso fraccional de la unidad sobre el itinerario completo (0.0–1.0)",
+    )
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), nullable=False
+    )
+
+    theme: Mapped[Theme] = relationship(back_populates="learning_units")
+    activity_logs: Mapped[list[StudentActivityLog]] = relationship(
+        back_populates="learning_unit",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    progress_records: Mapped[list[UnitProgress]] = relationship(
+        back_populates="learning_unit",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    __table_args__ = (Index("ix_learning_units_theme", "theme_id"),)
+
+    def __repr__(self) -> str:
+        return f"<LearningUnit id={self.id} name={self.name!r} weight={self.weight}>"
+
+
+class StudentActivityLog(Base):
+    """Histórico de actividades del alumno sobre una unidad de aprendizaje.
+
+    ``score_earned``:
+      - quiz: nota del cuestionario en escala 0–10.
+      - video / chat_question: puntos de "realización" (0.5 por defecto).
+    """
+
+    __tablename__ = "student_activity_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    learning_unit_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_units.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    activity_type: Mapped[ActivityType] = mapped_column(
+        Enum(ActivityType, values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+    )
+    score_earned: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        doc="Nota 0-10 si es quiz; 0.5 por acción (video/chat); NULL si no aplica",
+    )
+    detail: Mapped[str | None] = mapped_column(
+        Text, nullable=True, doc="Contexto opcional (pregunta, título del video…)"
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        server_default=func.now(), nullable=False
+    )
+
+    learning_unit: Mapped[LearningUnit] = relationship(back_populates="activity_logs")
+
+    __table_args__ = (
+        Index("ix_activity_session_unit", "session_id", "learning_unit_id"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<StudentActivityLog id={self.id} type={self.activity_type.value} "
+            f"score={self.score_earned}>"
+        )
+
+
+class UnitProgress(Base):
+    """Resumen de progreso de un alumno en una unidad de aprendizaje (celda).
+
+    ``total_score`` está en escala 0–10:
+      - 75% del valor proviene de la media de los quizzes.
+      - 25% restante de las realizaciones (+0.5 por acción, máx. 2.5).
+    ``color_code`` se materializa para el frontend: rojo (<5), amarillo
+    (5–7.5), verde (>7.5).
+    """
+
+    __tablename__ = "unit_progress"
+
+    session_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    learning_unit_id: Mapped[int] = mapped_column(
+        ForeignKey("learning_units.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    total_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    color_code: Mapped[str] = mapped_column(
+        String(7), nullable=False, default="#ef4444"
+    )
+    last_updated: Mapped[datetime] = mapped_column(
+        server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    learning_unit: Mapped[LearningUnit] = relationship(back_populates="progress_records")
+
+    __table_args__ = (Index("ix_unit_progress_session", "session_id"),)
+
+    def __repr__(self) -> str:
+        return (
+            f"<UnitProgress session={self.session_id!r} "
+            f"unit={self.learning_unit_id} score={self.total_score}>"
+        )

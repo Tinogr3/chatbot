@@ -35,6 +35,38 @@ app.conf.update(
 logger = get_logger("worker")
 
 
+async def _log_video_activity(
+    *,
+    session_id: str,
+    match_text: str,
+    video_title: str,
+) -> None:
+    """Registra una actividad 'video' en el cuadrante del Módulo Formador.
+
+    Abre su propia sesión de BD (el worker no tiene request scope) y commitea.
+    Si no hay itinerario o ninguna unidad hace match, no hace nada.
+    """
+    from database import AsyncSessionLocal, init_db
+    from models import ActivityType
+    from services.progress_service import ProgressService
+
+    await init_db()
+    async with AsyncSessionLocal() as db:
+        unit_id = await ProgressService.find_unit_for_text(
+            db, session_id=session_id, text=match_text
+        )
+        if unit_id is None:
+            return
+        await ProgressService.log_activity_and_update_progress(
+            db,
+            session_id=session_id,
+            unit_id=unit_id,
+            activity_type=ActivityType.VIDEO,
+            detail=f"Video procesado: {video_title}"[:500],
+        )
+        await db.commit()
+
+
 @app.task(bind=True, name="worker.process_video_task")
 def process_video_task(
     self,
@@ -94,6 +126,23 @@ def process_video_task(
             logger.warning("Error guardando video en document_registry: %s", e)
 
         # Extraer y persistir competencias a partir de la transcripción del video.
+        # Módulo Formador (best-effort): ver/procesar un video cuenta como
+        # realización (+0.5) en la celda más afín del itinerario.
+        try:
+            import asyncio as _asyncio_act
+
+            _asyncio_act.run(
+                _log_video_activity(
+                    session_id=session_id,
+                    match_text=f"{video_title} " + " ".join(
+                        d.page_content for d in documents[:3]
+                    ),
+                    video_title=video_title,
+                )
+            )
+        except Exception as e:
+            logger.warning("No se pudo registrar actividad de video en el cuadrante: %s", e)
+
         self.update_state(state="PROGRESS", meta={"progress": 0.9, "message": "Extrayendo competencias del video..."})
         try:
             from rag_engine import extract_document_competencies, save_extracted_competencies

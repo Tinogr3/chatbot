@@ -112,6 +112,43 @@ def _should_store_discovery_content(answer: str) -> bool:
     return not any(a.startswith(p) for p in bad_prefixes)
 
 
+async def _log_unit_activity_best_effort(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    text: str,
+    activity_type: Any,
+    score: Optional[float] = None,
+    detail: Optional[str] = None,
+) -> None:
+    """Registra actividad en el cuadrante del Módulo Formador (best-effort).
+
+    Mapea el texto (pregunta, tema…) a la `LearningUnit` más relevante del
+    itinerario de la sesión. Si no hay itinerario o no hay match, se omite
+    silenciosamente: el chat nunca debe fallar por el seguimiento.
+    """
+    try:
+        from services.progress_service import ProgressService
+
+        unit_id = await ProgressService.find_unit_for_text(
+            db, session_id=session_id, text=text
+        )
+        if unit_id is None:
+            return
+        await ProgressService.log_activity_and_update_progress(
+            db,
+            session_id=session_id,
+            unit_id=unit_id,
+            activity_type=activity_type,
+            score=score,
+            detail=detail,
+        )
+    except Exception:
+        logger.exception(
+            "No se pudo registrar actividad de unidad (session=%s).", session_id
+        )
+
+
 async def _find_learning_outcome_for_sources(
     db: AsyncSession,
     sources: Iterable[str],
@@ -225,6 +262,21 @@ async def chat(
                     "Error inesperado registrando progreso (session=%s).",
                     session_id,
                 )
+
+            # Módulo Formador: la evaluación del tutor cuenta como quiz (nota 0-10)
+            from models import ActivityType as _ActivityType
+
+            await _log_unit_activity_best_effort(
+                db,
+                session_id=session_id,
+                text=f"{learning_topic} {prompt}",
+                activity_type=_ActivityType.QUIZ,
+                score=_score_from_evaluation(
+                    is_correct=bool(result.get("is_correct")),
+                    is_partial=bool(result.get("is_partial")),
+                ) * 10.0,
+                detail=f"Evaluación en modo aprendizaje (tema: {learning_topic})",
+            )
     # Modo aprendizaje activado pero sin tema: el mensaje actual es el tema (iniciar sesión)
     elif learning_mode and not (learning_topic or "").strip():
         vector_store = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)
@@ -294,6 +346,18 @@ async def chat(
                         src = name.replace("search_document_", "").replace("_", " ") if "search_document_" in name else "Todos los documentos"
                         if src not in sources:
                             sources.append(src)
+
+                # Módulo Formador: pregunta relevante al chat → +0.5 en la celda
+                if category == QueryCategory.PREGUNTA_DOCUMENTO.value:
+                    from models import ActivityType as _ActivityType
+
+                    await _log_unit_activity_best_effort(
+                        db,
+                        session_id=session_id,
+                        text=prompt,
+                        activity_type=_ActivityType.CHAT_QUESTION,
+                        detail=prompt[:500],
+                    )
 
     # Persistir mensajes
     await chat_manager.save_message(session_id, "user", prompt)
