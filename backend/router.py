@@ -1,5 +1,9 @@
 """
 Smart Router - Sistema de enrutamiento inteligente de queries (backend).
+
+Clasifica cada consulta y extrae contexto acumulado del chat (preferencias,
+restricciones de formato, instrucciones de comportamiento) para inyectarlo en
+cada flujo de respuesta downstream.
 """
 import os
 from enum import Enum
@@ -7,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
 from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel, Field
 
 from config import get_credentials_and_project
 from gemini_models import gemini_pro_model_id
@@ -36,6 +41,69 @@ class QueryCategory(Enum):
     OTRO = "OTRO"
 
 
+class RouteResult(BaseModel):
+    """Salida del smart router: categoría + contexto acumulado para la respuesta."""
+
+    category: str = Field(
+        ...,
+        description="Una de: CONVERSACION, PREGUNTA_DOCUMENTO, RESUMEN, EXAMEN, APRENDIZAJE, OTRO",
+    )
+    context: str = Field(
+        default="",
+        description=(
+            "Preferencias, restricciones e instrucciones del usuario extraídas del "
+            "historial y de la consulta actual (formato, tono, nivel, alcance, etc.). "
+            "Vacío si no hay nada relevante."
+        ),
+    )
+
+
+def build_context_block(route_context: str) -> str:
+    """Bloque de prompt listo para inyectar en los generadores downstream."""
+    ctx = (route_context or "").strip()
+    if not ctx:
+        return ""
+    return (
+        "\n\nCONTEXTO Y RESTRICCIONES DEL USUARIO "
+        "(respeta siempre al redactar la respuesta):\n"
+        f"{ctx}\n"
+    )
+
+
+def _format_history_for_routing(
+    chat_history: Optional[List[Dict[str, Any]]],
+    *,
+    max_messages: int = 10,
+    max_chars_per_message: int = 400,
+) -> str:
+    """Resume el historial reciente para la clasificación."""
+    if not chat_history:
+        return "(sin historial previo)"
+    recent = chat_history[-max_messages:]
+    lines: List[str] = []
+    for msg in recent:
+        role = "Usuario" if msg.get("role") == "user" else "Asistente"
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        if len(content) > max_chars_per_message:
+            content = content[:max_chars_per_message] + "…"
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines) if lines else "(sin historial previo)"
+
+
+def _normalize_category(raw: str) -> str:
+    """Normaliza la categoría devuelta por el LLM."""
+    category = (raw or "").strip().upper()
+    valid = [c.value for c in QueryCategory]
+    if category in valid:
+        return category
+    for valid_cat in valid:
+        if valid_cat in category:
+            return valid_cat
+    return QueryCategory.PREGUNTA_DOCUMENTO.value
+
+
 def get_model(temperature: float = 0.7, max_output_tokens: int = 65535) -> Optional[ChatGoogleGenerativeAI]:
     try:
         api_key = os.getenv("GOOGLE_API_KEY")
@@ -61,49 +129,98 @@ def get_model(temperature: float = 0.7, max_output_tokens: int = 65535) -> Optio
         return None
 
 
-def route_query(query: str, max_tokens: int = 65535) -> str:
+def route_query(
+    query: str,
+    max_tokens: int = 65535,
+    *,
+    chat_history: Optional[List[Dict[str, Any]]] = None,
+    user_facts: str = "",
+) -> RouteResult:
+    """Clasifica la consulta y extrae contexto/restricciones del chat.
+
+    El ``context`` devuelto resume preferencias e instrucciones acumuladas
+    (formato, tono, nivel, alcance, restricciones explícitas) para que cada
+    flujo downstream genere respuestas más alineadas con lo pedido.
+    """
+    fallback = RouteResult(category=QueryCategory.PREGUNTA_DOCUMENTO.value, context="")
     llm = get_model(temperature=0.1, max_output_tokens=max_tokens)
     if not llm:
-        return QueryCategory.PREGUNTA_DOCUMENTO.value
-    classification_prompt = f"""Clasifica la siguiente consulta del usuario en UNA de estas categorías:
+        return fallback
 
-CATEGORÍAS:
-- CONVERSACION: Saludos, despedidas, charla casual, preguntas personales al asistente, agradecimientos. Incluye cuando el usuario da información sobre sí mismo (ej: "me llamo X", "trabajo en Y", "soy de Z") o da instrucciones sobre cómo comportarse.
-- PREGUNTA_DOCUMENTO: Preguntas específicas que requieren buscar información en documentos
-- RESUMEN: Solicitudes de resumir, sintetizar o dar una visión general del contenido
-- EXAMEN: Solicitudes de crear un examen, test, cuestionario, evaluación con preguntas o repasar con preguntas tipo examen sobre el material
-- APRENDIZAJE: El usuario quiere aprender con tutoría guiada, estudiar con el modo tutor, practicar de forma conversacional o que le enseñen paso a paso un tema (no un examen escrito de una vez)
-- OTRO: Cualquier otra cosa que no encaje en las anteriores
+    history_block = _format_history_for_routing(chat_history)
+    facts_block = (
+        f"\nHECHOS CONOCIDOS SOBRE EL USUARIO:\n{user_facts.strip()}\n"
+        if (user_facts or "").strip()
+        else ""
+    )
 
-CONSULTA DEL USUARIO:
+    classification_prompt = f"""Eres el router de un asistente educativo. Tu tarea tiene DOS partes:
+
+1) CLASIFICAR la consulta actual en UNA categoría.
+2) EXTRAER un resumen breve de contexto/restricciones que el asistente debe respetar al responder.
+
+CATEGORÍAS (elige exactamente una):
+- CONVERSACION: Saludos, despedidas, charla casual, preguntas personales al asistente, agradecimientos. Incluye cuando el usuario da información sobre sí mismo o instrucciones sobre cómo comportarse.
+- PREGUNTA_DOCUMENTO: Preguntas específicas que requieren buscar información en documentos.
+- RESUMEN: Solicitudes de resumir, sintetizar o dar una visión general del contenido. ÚNICAMENTE si el usuario pide explícitamente un resumen.
+- EXAMEN: Solicitudes de crear un examen, test, cuestionario o evaluación escrita. ÚNICAMENTE si el usuario usa explícitamente esas palabras.
+- APRENDIZAJE: Quiere aprender con tutoría guiada, estudiar paso a paso o practicar de forma conversacional (no un examen escrito de una vez).
+- OTRO: Instrucciones complejas, tareas multi-paso o cualquier cosa que no encaje; el agente libre la procesará.
+
+Para ``context``, sintetiza en 1-4 frases (o deja vacío) lo relevante de:
+- Preferencias de formato, tono, idioma o nivel pedido en el chat.
+- Restricciones explícitas (ej: "sin tecnicismos", "máximo 3 párrafos", "solo del capítulo 2", "en viñetas").
+- Instrucciones de comportamiento dadas en mensajes anteriores que sigan vigentes.
+- Tema o foco acumulado de la conversación si afecta a la consulta actual.
+No repitas la consulta literal; extrae solo lo que mejore la calidad de la respuesta.
+Si no hay nada útil, devuelve context como cadena vacía.
+
+HISTORIAL RECIENTE DEL CHAT:
+{history_block}
+{facts_block}
+CONSULTA ACTUAL DEL USUARIO:
 "{query}"
 
-INSTRUCCIONES:
-- Responde ÚNICAMENTE con una de estas palabras: CONVERSACION, PREGUNTA_DOCUMENTO, RESUMEN, EXAMEN, APRENDIZAJE, OTRO
-- No agregues explicaciones ni texto adicional
+Reglas:
+- Si no estás seguro de la categoría, usa OTRO.
+- RESUMEN y EXAMEN solo si el usuario lo pide explícitamente en la consulta actual."""
 
-CATEGORÍA:"""
     try:
-        response = llm.invoke(classification_prompt)
-        category = extract_text(response.content).strip().upper()
-        valid_categories = [c.value for c in QueryCategory]
-        if category in valid_categories:
-            return category
-        for valid_cat in valid_categories:
-            if valid_cat in category:
-                return valid_cat
-        return QueryCategory.PREGUNTA_DOCUMENTO.value
+        structured_llm = llm.with_structured_output(RouteResult)
+        result: Optional[RouteResult] = structured_llm.invoke(classification_prompt)
+        if result is None:
+            return fallback
+        return RouteResult(
+            category=_normalize_category(result.category),
+            context=(result.context or "").strip(),
+        )
     except Exception as e:
-        logger.warning("Error routing query: %s", e)
-        return QueryCategory.PREGUNTA_DOCUMENTO.value
+        logger.warning("Error routing query (structured): %s", e)
+        # Fallback sin structured output por compatibilidad con modelos antiguos
+        try:
+            response = llm.invoke(
+                classification_prompt
+                + "\n\nResponde SOLO con la categoría en una línea."
+            )
+            category = _normalize_category(extract_text(response.content))
+            return RouteResult(category=category, context="")
+        except Exception as e2:
+            logger.warning("Error routing query (fallback): %s", e2)
+            return fallback
 
 
-def get_direct_response(query: str, session_id: Optional[str] = None, user_facts: str = "", max_tokens: int = 65535) -> str:
+def get_direct_response(
+    query: str,
+    session_id: Optional[str] = None,
+    user_facts: str = "",
+    max_tokens: int = 65535,
+    route_context: str = "",
+) -> str:
     llm = get_model(temperature=0.7, max_output_tokens=max_tokens)
     if not llm:
         return "Lo siento, no puedo responder en este momento."
     user_context = f"\n\nInformación conocida sobre el usuario:\n{user_facts}\n" if user_facts else ""
-    prompt = f"""Eres un asistente educativo amigable y servicial.{user_context}
+    prompt = f"""Eres un asistente educativo amigable y servicial.{user_context}{build_context_block(route_context)}
 
 Responde de manera natural y cálida a la siguiente conversación del usuario.
 Si te preguntan qué puedes hacer, menciona que puedes:
@@ -127,6 +244,7 @@ def get_summary_response(
     vector_store: Any,
     session_id: Optional[str] = None,
     max_tokens: int = 65535,
+    route_context: str = "",
 ) -> Dict[str, Any]:
     llm = get_model(temperature=0.3, max_output_tokens=max_tokens)
     if not llm:
@@ -155,6 +273,9 @@ INSTRUCCIONES:
 4. Menciona las fuentes cuando sea relevante.
 5. Incluye los conceptos, datos e ideas importantes de TODOS los fragmentos recibidos.
 6. El resumen debe ser comprensivo y completo, sin omitir contenido por estar en bloques alejados en la lista.
+{build_context_block(route_context)}
+PETICIÓN DEL USUARIO:
+{query}
 
 RESUMEN ESTRUCTURADO (sintetizando todo el contenido recibido):"""
         response = llm.invoke(summary_prompt)
@@ -169,6 +290,7 @@ def get_exam_response(
     vector_store: Any,
     session_id: Optional[str] = None,
     max_tokens: int = 65535,
+    route_context: str = "",
 ) -> Dict[str, Any]:
     """Genera un examen (preguntas con opciones y breve clave) a partir de los documentos."""
     llm = get_model(temperature=0.35, max_output_tokens=max_tokens)
@@ -191,7 +313,7 @@ CONTENIDO (fragmentos del material; pueden estar desordenados):
 
 PETICIÓN DEL ESTUDIANTE:
 {query}
-
+{build_context_block(route_context)}
 INSTRUCCIONES:
 1. Crea entre 8 y 12 preguntas que cubran los temas principales del material.
 2. Mezcla preguntas de opción múltiple (4 opciones: A, B, C, D) y 2-3 preguntas de desarrollo breve.
@@ -213,7 +335,11 @@ class LearningFlowManager:
         self.max_tokens = max_tokens
         self.llm = get_model(temperature=0.3, max_output_tokens=max_tokens)
 
-    def start_learning_session(self, topic_query: str) -> Dict[str, Any]:
+    def start_learning_session(
+        self,
+        topic_query: str,
+        route_context: str = "",
+    ) -> Dict[str, Any]:
         """Inicia una sesión de aprendizaje sobre el tema indicado."""
         if not self.llm:
             return {"content": "No puedo iniciar la sesión de aprendizaje en este momento.", "question": None, "topic": None, "source_documents": []}
@@ -234,7 +360,7 @@ CONTENIDO DE REFERENCIA:
 {context}
 
 TEMA SOLICITADO: {topic_query}
-
+{build_context_block(route_context)}
 INSTRUCCIONES ESTRICTAS:
 1. NO escribas parrafadas largas. Sé breve y conversacional.
 2. Introduce el concepto más básico del tema solicitado muy brevemente.
@@ -260,7 +386,13 @@ FORMATO DE RESPUESTA:
             logger.warning("Error starting learning session: %s", e)
             return {"content": f"Error iniciando sesión de aprendizaje: {str(e)}", "question": None, "topic": None, "source_documents": []}
 
-    def evaluate_answer(self, user_answer: str, topic: str, previous_content: str) -> Dict[str, Any]:
+    def evaluate_answer(
+        self,
+        user_answer: str,
+        topic: str,
+        previous_content: str,
+        route_context: str = "",
+    ) -> Dict[str, Any]:
         if not self.llm:
             return {"content": "No puedo evaluar la respuesta en este momento.", "is_correct": False, "source_documents": []}
         retriever = self.vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 6, "fetch_k": 15})
@@ -272,7 +404,7 @@ FORMATO DE RESPUESTA:
 CONTEXTO PREVIO: {previous_content}
 MATERIAL DE REFERENCIA: {context}
 RESPUESTA DEL ESTUDIANTE: {user_answer}
-
+{build_context_block(route_context)}
 INSTRUCCIONES DE EVALUACIÓN:
 1. Analiza la lógica del estudiante.
 2. Si la respuesta es INCORRECTA:

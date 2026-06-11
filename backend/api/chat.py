@@ -20,6 +20,7 @@ from rag_engine import initialize_agent, initialize_vector_store_async
 from router import (
     QueryCategory,
     LearningFlowManager,
+    build_context_block,
     get_direct_response,
     get_exam_response,
     get_summary_response,
@@ -291,15 +292,44 @@ async def chat(
                 learning_topic = result.get("topic", prompt)
                 last_learning_content = answer
     else:
-        # Clasificar y ejecutar flujo normal
-        category = route_query(prompt, max_tokens=max_tokens)
+        # Clasificar con historial + hechos del usuario para extraer también
+        # contexto/restricciones acumuladas del chat.
+        user_facts = user_memory.get_user_facts_formatted(session_id)
+        chat_history = await chat_manager.get_history(session_id)
+        route_result = route_query(
+            prompt,
+            max_tokens=max_tokens,
+            chat_history=chat_history,
+            user_facts=user_facts,
+        )
+        category = route_result.category
+        route_context = route_result.context
+        if route_context:
+            logger.info(
+                "Router contexto (session=%s, category=%s): %s",
+                session_id,
+                category,
+                route_context[:200],
+            )
+
         vector_store = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)
 
         if category == QueryCategory.CONVERSACION.value:
-            user_facts = user_memory.get_user_facts_formatted(session_id)
-            answer = get_direct_response(prompt, session_id, user_facts, max_tokens=max_tokens)
+            answer = get_direct_response(
+                prompt,
+                session_id,
+                user_facts,
+                max_tokens=max_tokens,
+                route_context=route_context,
+            )
         elif category == QueryCategory.RESUMEN.value and vector_store:
-            result = get_summary_response(prompt, vector_store, session_id, max_tokens=max_tokens)
+            result = get_summary_response(
+                prompt,
+                vector_store,
+                session_id,
+                max_tokens=max_tokens,
+                route_context=route_context,
+            )
             answer = result.get("answer", "No se pudo generar el resumen.")
             sources = list(set(_doc_to_source(d) for d in result.get("source_documents", [])))
             if _should_store_discovery_content(answer):
@@ -308,7 +338,13 @@ async def chat(
                 except Exception as exc:
                     logger.warning("No se pudo guardar resumen en Discovery Hub: %s", exc)
         elif category == QueryCategory.EXAMEN.value and vector_store:
-            result = get_exam_response(prompt, vector_store, session_id, max_tokens=max_tokens)
+            result = get_exam_response(
+                prompt,
+                vector_store,
+                session_id,
+                max_tokens=max_tokens,
+                route_context=route_context,
+            )
             answer = result.get("answer", "No se pudo generar el examen.")
             sources = list(set(_doc_to_source(d) for d in result.get("source_documents", [])))
             if _should_store_discovery_content(answer):
@@ -318,7 +354,9 @@ async def chat(
                     logger.warning("No se pudo guardar examen en Discovery Hub: %s", exc)
         elif category == QueryCategory.APRENDIZAJE.value and vector_store:
             learning_manager = LearningFlowManager(vector_store, session_id, max_tokens=max_tokens)
-            result = learning_manager.start_learning_session(prompt)
+            result = learning_manager.start_learning_session(
+                prompt, route_context=route_context
+            )
             answer = result.get("content", "No se pudo iniciar la sesión.")
             sources = list(set(_doc_to_source(d) for d in result.get("source_documents", [])))
             if result.get("is_learning_mode"):
@@ -332,7 +370,13 @@ async def chat(
                 answer = "No hay documentos cargados. Sube o procesa al menos un PDF o video."
             else:
                 from langchain_core.messages import HumanMessage as HMsg
-                agent_result = agent.invoke({"messages": [HMsg(content=prompt)]})
+                agent_prompt = prompt
+                ctx_block = build_context_block(route_context)
+                if ctx_block:
+                    agent_prompt = (
+                        f"{ctx_block.strip()}\n\nCONSULTA ACTUAL DEL USUARIO:\n{prompt}"
+                    )
+                agent_result = agent.invoke({"messages": [HMsg(content=agent_prompt)]})
                 agent_messages = agent_result.get("messages", [])
                 for msg in reversed(agent_messages):
                     if getattr(msg, "type", None) == "ai" and getattr(msg, "content", None):
