@@ -175,6 +175,17 @@ export interface LearningUnitCreate {
   definition: string;
   weight: number;
   order_index?: number;
+  /** ID del learning outcome enlazado (opcional). */
+  learning_outcome_id?: number | null;
+}
+
+/** Opción de competencia para enlazar una celda del cuadrante. */
+export interface TrainerLearningOutcomeOption {
+  id: number;
+  description: string;
+  competency_name: string;
+  subcompetency_name: string;
+  document_id: string;
 }
 
 export interface ThemeCreate {
@@ -262,6 +273,8 @@ export interface ChatOptions {
   learning_mode?: boolean;
   learning_topic?: string | null;
   last_learning_content?: string | null;
+  /** Celda del cuadrante asociada (cuestionario / evaluación de unidad). */
+  learning_unit_id?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +351,7 @@ export async function chat(
     learning_mode: options.learning_mode ?? false,
     learning_topic: options.learning_topic ?? null,
     last_learning_content: options.last_learning_content ?? null,
+    learning_unit_id: options.learning_unit_id ?? null,
   };
   try {
     return await fetchJson<ChatResponse>(`${BACKEND_URL}/chat`, {
@@ -635,6 +649,19 @@ export async function submitEvaluation(
 // ---------------------------------------------------------------------------
 // Módulo Formador
 // ---------------------------------------------------------------------------
+
+/**
+ * GET /trainer/learning-outcomes — Competencias enlazables a celdas del cuadrante.
+ */
+export async function getTrainerLearningOutcomes(
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<TrainerLearningOutcomeOption[]> {
+  return fetchJson<TrainerLearningOutcomeOption[]>(
+    `${BACKEND_URL}/trainer/learning-outcomes`,
+    { method: "GET", sessionId, accessToken },
+  );
+}
 
 /**
  * POST /trainer/generate-itinerary — Genera el cuadrante con IA (no persiste).

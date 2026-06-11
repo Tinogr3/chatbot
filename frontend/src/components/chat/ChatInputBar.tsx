@@ -1,13 +1,18 @@
 "use client";
 
-import { useRef, type FormEvent, type RefObject } from "react";
+import { useCallback, useRef, type FormEvent, type RefObject } from "react";
 import { Book, BookOpen, HelpCircle, Send } from "lucide-react";
+import { useChatAction, type ChatActionDetail } from "@/lib/progressEvents";
 import { dictionaries } from "@/locales";
 
 const t = dictionaries.mainContent;
 
+export type ChatSendOptions = {
+  learning_unit_id?: number;
+};
+
 export type ChatInputBarProps = {
-  onSendMessage?: (text: string) => void;
+  onSendMessage?: (text: string, options?: ChatSendOptions) => void;
   inputRef?: RefObject<HTMLInputElement | null>;
   isLearningMode?: boolean;
   onToggleLearningMode?: () => void;
@@ -22,13 +27,26 @@ export default function ChatInputBar({
   const internalRef = useRef<HTMLInputElement>(null);
   const ref = inputRef ?? internalRef;
 
+  const handleSendMessage = useCallback(
+    (text: string, options?: ChatSendOptions) => {
+      const value = text.trim();
+      if (!value || !onSendMessage) return;
+      onSendMessage(value, options);
+      if (ref.current) ref.current.value = "";
+    },
+    [onSendMessage, ref],
+  );
+
+  useChatAction((detail: ChatActionDetail) => {
+    handleSendMessage(detail.prompt, {
+      learning_unit_id: detail.learning_unit_id,
+    });
+  });
+
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const value = ref.current?.value?.trim();
-    if (value && onSendMessage) {
-      onSendMessage(value);
-      ref.current!.value = "";
-    }
+    if (value) handleSendMessage(value);
   };
 
   const learningModeLabel = isLearningMode

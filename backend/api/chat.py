@@ -1,7 +1,8 @@
 """
 Endpoints de chat - POST /chat
 """
-from typing import Any, Iterable, List, Optional
+import asyncio
+from typing import Any, Iterable, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -15,7 +16,8 @@ from discovery_repo import add_stored_exam, add_stored_summary
 from database import get_db
 from document_registry import load_document_registry
 from logger import get_logger
-from models import Competency, LearningOutcome, Subcompetency
+from evaluation_engine import EvaluationService
+from models import Competency, LearningOutcome, LearningUnit, Subcompetency
 from rag_engine import initialize_agent, initialize_vector_store_async
 from router import (
     QueryCategory,
@@ -25,6 +27,7 @@ from router import (
     get_exam_response,
     get_summary_response,
     route_query,
+    RouteResult,
 )
 from schemas import ChatRequest, ChatResponse
 from user_memory import UserMemoryManager
@@ -111,6 +114,140 @@ def _should_store_discovery_content(answer: str) -> bool:
         "Error al generar",
     )
     return not any(a.startswith(p) for p in bad_prefixes)
+
+
+_EXAM_REQUEST_MARKERS = (
+    "cuestionario",
+    "examen",
+    "test",
+    "evaluar unidad",
+    "genera un examen",
+    "hazme un",
+    "evaluación escrita",
+)
+
+
+def _is_exam_generation_request(text: str) -> bool:
+    """True si el mensaje pide crear un examen/cuestionario (no enviar respuestas)."""
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in _EXAM_REQUEST_MARKERS)
+
+
+def _looks_like_exam_content(text: str) -> bool:
+    """Heurística: el último mensaje del asistente parece un examen entregado."""
+    content = (text or "").strip()
+    if len(content) < 120:
+        return False
+    lowered = content.lower()
+    markers = (
+        "pregunta",
+        "a)",
+        "b)",
+        "c)",
+        "d)",
+        "opción",
+        "desarrollo",
+        "envía tus respuestas",
+        "copiar sus respuestas",
+    )
+    return sum(1 for marker in markers if marker in lowered) >= 2
+
+
+def _last_assistant_message(chat_history: List[dict]) -> str:
+    for msg in reversed(chat_history):
+        if msg.get("role") == "assistant":
+            return (msg.get("content") or "").strip()
+    return ""
+
+
+async def _load_learning_unit(
+    db: AsyncSession, unit_id: int
+) -> Optional[LearningUnit]:
+    return (
+        await db.execute(select(LearningUnit).where(LearningUnit.id == unit_id))
+    ).scalar_one_or_none()
+
+
+async def _register_unit_quiz_progress(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    unit_id: int,
+    score: float,
+    detail: str,
+) -> bool:
+    """Registra una actividad quiz en la celda del cuadrante. Devuelve True si tuvo éxito."""
+    try:
+        from models import ActivityType
+        from services.progress_service import ProgressService
+
+        await ProgressService.log_activity_and_update_progress(
+            db,
+            session_id=session_id,
+            unit_id=unit_id,
+            activity_type=ActivityType.QUIZ,
+            score=score,
+            detail=detail,
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "No se pudo registrar progreso de cuestionario (session=%s, unit=%s).",
+            session_id,
+            unit_id,
+        )
+        return False
+
+
+async def _try_evaluate_quiz_submission(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    learning_unit_id: int,
+    prompt: str,
+    chat_history: List[dict],
+    max_tokens: int,
+) -> Optional[Tuple[str, bool]]:
+    """Evalúa respuestas del alumno a un cuestionario previo de la misma unidad."""
+    if _is_exam_generation_request(prompt):
+        return None
+
+    last_assistant = _last_assistant_message(chat_history)
+    if not _looks_like_exam_content(last_assistant):
+        return None
+
+    unit = await _load_learning_unit(db, learning_unit_id)
+    if unit is None:
+        return None
+
+    try:
+        evaluation = await asyncio.to_thread(
+            EvaluationService.evaluate_quiz_submission,
+            f"{unit.name}: {unit.definition}",
+            last_assistant[:12000],
+            prompt,
+        )
+    except Exception:
+        logger.exception("Fallo evaluando respuestas del cuestionario (session=%s).", session_id)
+        return None
+
+    score_10 = max(0.0, min(10.0, float(evaluation["score"]) * 10.0))
+    feedback = str(evaluation["feedback"])
+    progress_ok = await _register_unit_quiz_progress(
+        db,
+        session_id=session_id,
+        unit_id=learning_unit_id,
+        score=score_10,
+        detail="Respuestas evaluadas del cuestionario",
+    )
+
+    answer = (
+        f"## Corrección del cuestionario — {unit.name}\n\n"
+        f"**Nota:** {score_10:.1f} / 10\n\n"
+        f"{feedback}\n\n"
+        "_Tu progreso en el cuadrante se ha actualizado con esta nota._"
+    )
+    return answer, progress_ok
 
 
 async def _log_unit_activity_best_effort(
@@ -200,7 +337,32 @@ async def chat(
     learning_mode = body.learning_mode
     learning_topic = body.learning_topic
     last_learning_content = body.last_learning_content or ""
+    learning_unit_id = body.learning_unit_id
     progress_updated = False
+
+    # Evaluar respuestas a un cuestionario de una celda del cuadrante
+    if learning_unit_id and not learning_mode:
+        chat_history_early = await chat_manager.get_history(session_id)
+        quiz_result = await _try_evaluate_quiz_submission(
+            db,
+            session_id=session_id,
+            learning_unit_id=learning_unit_id,
+            prompt=prompt,
+            chat_history=chat_history_early,
+            max_tokens=max_tokens,
+        )
+        if quiz_result is not None:
+            answer, progress_updated = quiz_result
+            await chat_manager.save_message(session_id, "user", prompt)
+            await chat_manager.save_message(session_id, "assistant", answer, None)
+            user_memory.extract_and_save_async(session_id, prompt, answer, max_tokens=max_tokens)
+            return ChatResponse(
+                answer=answer,
+                sources=[],
+                learning_mode=False,
+                learning_topic=None,
+                progress_updated=progress_updated,
+            )
 
     # Salir del modo aprendizaje
     if learning_mode and prompt.lower().strip() in ["salir", "exit", "terminar", "fin"]:
@@ -229,6 +391,7 @@ async def chat(
             # `UserCompetencyProgress`. Si algo falla, lo logeamos pero NO
             # lo propagamos: el usuario debe seguir viendo la respuesta
             # del tutor aunque el progreso no se haya podido registrar.
+            outcome_id: Optional[int] = None
             try:
                 score = _score_from_evaluation(
                     is_correct=bool(result.get("is_correct")),
@@ -264,20 +427,36 @@ async def chat(
                     session_id,
                 )
 
-            # Módulo Formador: la evaluación del tutor cuenta como quiz (nota 0-10)
-            from models import ActivityType as _ActivityType
+            # Módulo Formador: quiz en la celda enlazada por learning_outcome_id
+            try:
+                from models import ActivityType as _ActivityType
+                from services.progress_service import ProgressService
 
-            await _log_unit_activity_best_effort(
-                db,
-                session_id=session_id,
-                text=f"{learning_topic} {prompt}",
-                activity_type=_ActivityType.QUIZ,
-                score=_score_from_evaluation(
+                quiz_score = _score_from_evaluation(
                     is_correct=bool(result.get("is_correct")),
                     is_partial=bool(result.get("is_partial")),
-                ) * 10.0,
-                detail=f"Evaluación en modo aprendizaje (tema: {learning_topic})",
-            )
+                ) * 10.0
+                unit_id = None
+                if outcome_id is not None:
+                    unit_id = await ProgressService.find_unit_by_outcome_id(
+                        db,
+                        session_id=session_id,
+                        learning_outcome_id=outcome_id,
+                    )
+                if unit_id is not None:
+                    await ProgressService.log_activity_and_update_progress(
+                        db,
+                        session_id=session_id,
+                        unit_id=unit_id,
+                        activity_type=_ActivityType.QUIZ,
+                        score=quiz_score,
+                        detail=f"Evaluación en modo aprendizaje (tema: {learning_topic})",
+                    )
+            except Exception:
+                logger.exception(
+                    "No se pudo registrar el quiz en el cuadrante (session=%s).",
+                    session_id,
+                )
     # Modo aprendizaje activado pero sin tema: el mensaje actual es el tema (iniciar sesión)
     elif learning_mode and not (learning_topic or "").strip():
         vector_store = await initialize_vector_store_async(documents=None, existing_vector_store=None, session_id=session_id)
@@ -304,6 +483,10 @@ async def chat(
         )
         category = route_result.category
         route_context = route_result.context
+        # Petición desde el cuadrante: forzar EXAMEN si pide cuestionario
+        if learning_unit_id and _is_exam_generation_request(prompt):
+            category = QueryCategory.EXAMEN.value
+            route_result = RouteResult(category=category, context=route_context)
         if route_context:
             logger.info(
                 "Router contexto (session=%s, category=%s): %s",
@@ -338,12 +521,19 @@ async def chat(
                 except Exception as exc:
                     logger.warning("No se pudo guardar resumen en Discovery Hub: %s", exc)
         elif category == QueryCategory.EXAMEN.value and vector_store:
+            unit = (
+                await _load_learning_unit(db, learning_unit_id)
+                if learning_unit_id
+                else None
+            )
             result = get_exam_response(
                 prompt,
                 vector_store,
                 session_id,
                 max_tokens=max_tokens,
                 route_context=route_context,
+                unit_name=unit.name if unit else None,
+                unit_definition=unit.definition if unit else None,
             )
             answer = result.get("answer", "No se pudo generar el examen.")
             sources = list(set(_doc_to_source(d) for d in result.get("source_documents", [])))

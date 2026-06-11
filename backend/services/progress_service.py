@@ -218,6 +218,33 @@ class ProgressService:
             progress.color_code = color
 
     # ------------------------------------------------------------------
+    # Resolución de unidad por enlace fuerte (learning_outcome_id)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def find_unit_by_outcome_id(
+        db: AsyncSession,
+        *,
+        session_id: str,
+        learning_outcome_id: int,
+    ) -> Optional[int]:
+        """Devuelve el id de la ``LearningUnit`` enlazada a un outcome en el itinerario activo."""
+        unit_id = (
+            await db.execute(
+                select(LearningUnit.id)
+                .join(Theme, LearningUnit.theme_id == Theme.id)
+                .join(CourseItinerary, Theme.itinerary_id == CourseItinerary.id)
+                .where(
+                    LearningUnit.learning_outcome_id == learning_outcome_id,
+                    CourseItinerary.session_id == session_id,
+                )
+                .order_by(CourseItinerary.id.desc(), LearningUnit.id.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return int(unit_id) if unit_id is not None else None
+
+    # ------------------------------------------------------------------
     # Mapeo texto → unidad (best-effort para hooks de chat/video)
     # ------------------------------------------------------------------
 

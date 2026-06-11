@@ -7,8 +7,13 @@ de historial/memoria existente.
 import os
 from typing import AsyncGenerator
 
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+
+from logger import get_logger
+
+logger = get_logger("database")
 
 
 def _resolve_database_url() -> str:
@@ -64,7 +69,56 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+def _apply_schema_patches_sync(connection) -> None:
+    """Parches incrementales que ``create_all()`` no aplica a tablas ya existentes.
+
+    SQLAlchemy solo crea tablas nuevas; no añade columnas ni índices en tablas
+    desplegadas previamente. Cada parche comprueba si el cambio ya está aplicado
+    antes de ejecutar DDL (idempotente en cada arranque).
+    """
+    insp = inspect(connection)
+    if not insp.has_table("learning_units"):
+        return
+
+    columns = {col["name"] for col in insp.get_columns("learning_units")}
+    if "learning_outcome_id" in columns:
+        return
+
+    dialect = connection.dialect.name
+    logger.info(
+        "Aplicando parche de esquema: añadir learning_units.learning_outcome_id (%s)",
+        dialect,
+    )
+    if dialect == "postgresql":
+        # IF NOT EXISTS evita DuplicateColumnError con varios workers de Uvicorn
+        # arrancando lifespan en paralelo.
+        connection.execute(
+            text(
+                "ALTER TABLE learning_units "
+                "ADD COLUMN IF NOT EXISTS learning_outcome_id INTEGER "
+                "REFERENCES learning_outcomes(id) ON DELETE SET NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_learning_units_outcome "
+                "ON learning_units (learning_outcome_id)"
+            )
+        )
+    else:
+        # SQLite y otros: columna nullable; el FK se valida a nivel ORM.
+        connection.execute(
+            text(
+                "ALTER TABLE learning_units "
+                "ADD COLUMN learning_outcome_id INTEGER"
+            )
+        )
+
+
 async def init_db() -> None:
-    """Crea todas las tablas definidas en Base.metadata (idempotente)."""
+    """Crea tablas nuevas y aplica parches de esquema incrementales (idempotente)."""
+    import models  # noqa: F401 — registra todas las tablas en Base.metadata
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_apply_schema_patches_sync)

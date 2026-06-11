@@ -46,3 +46,69 @@ export function useProgressUpdated(handler: () => void): void {
     };
   }, [handler]);
 }
+
+// ---------------------------------------------------------------------------
+// Acciones de chat desacopladas (cuadrante → chatbot)
+// ---------------------------------------------------------------------------
+
+export const LAUNCH_CHAT_ACTION_EVENT = "cotutor:launch-chat-action" as const;
+
+/** Payload de una acción de chat lanzada desde el cuadrante u otros módulos. */
+export type ChatActionDetail = {
+  prompt: string;
+  learning_unit_id?: number;
+  unit_name?: string;
+  unit_definition?: string;
+};
+
+/**
+ * Emite una orden de chat (p. ej. generar cuestionario desde el cuadrante).
+ * El consumidor es `ChatInputBar` vía `useChatAction`.
+ */
+export function dispatchChatAction(detail: ChatActionDetail | string): void {
+  if (typeof window === "undefined") return;
+  const payload: ChatActionDetail =
+    typeof detail === "string" ? { prompt: detail } : detail;
+  if (!payload.prompt?.trim()) return;
+  window.dispatchEvent(
+    new CustomEvent(LAUNCH_CHAT_ACTION_EVENT, { detail: payload }),
+  );
+}
+
+/** Prompt y metadatos para solicitar un cuestionario exclusivo de una unidad. */
+export function buildUnitQuizAction(
+  unitId: number,
+  unitName: string,
+  unitDefinition: string,
+): ChatActionDetail {
+  return {
+    learning_unit_id: unitId,
+    unit_name: unitName,
+    unit_definition: unitDefinition,
+    prompt: `Genera un cuestionario escrito de nivel adaptativo EXCLUSIVAMENTE sobre esta unidad de aprendizaje.
+Tema: ${unitName}
+Enfoque obligatorio: ${unitDefinition}
+Incluye preguntas de opción múltiple (A-D) y de desarrollo breve.
+NO incluyas soluciones ni clave de respuestas.
+No incluyas contenido de otras unidades del curso.
+Indica al final que puedo enviar mis respuestas por chat para que las corrijas.`,
+  };
+}
+
+/**
+ * Suscribe `handler` al evento global de acción de chat.
+ */
+export function useChatAction(handler: (detail: ChatActionDetail) => void): void {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const listener = (e: Event) => {
+      const customEvent = e as CustomEvent<ChatActionDetail>;
+      const detail = customEvent.detail;
+      if (detail?.prompt?.trim()) handler(detail);
+    };
+    window.addEventListener(LAUNCH_CHAT_ACTION_EVENT, listener);
+    return () => {
+      window.removeEventListener(LAUNCH_CHAT_ACTION_EVENT, listener);
+    };
+  }, [handler]);
+}

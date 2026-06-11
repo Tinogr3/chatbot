@@ -234,6 +234,11 @@ export const dictionaries = {
       unitHeader: "Concepto",
       definitionHeader: "Definición",
       weightHeader: "Peso %",
+      competencyHeader: "Competencia",
+      competencyPlaceholder: "Sin enlace",
+      competencyLoading: "Cargando competencias…",
+      noCompetencies:
+        "Sube documentos al proyecto para extraer competencias y poder enlazarlas aquí.",
       totalWeight: (total: string) => `Peso total: ${total}%`,
       weightWarning: "El peso total debería sumar 100%.",
       save: "Validar y Guardar",
@@ -252,19 +257,24 @@ export const dictionaries = {
       refresh: "Actualizar",
       cellAriaLabel: (name: string, score: number) =>
         `${name}: ${score} sobre 10. Pulsa para ver el detalle.`,
+      generateQuiz: "Evaluar Unidad",
+      generateQuizAriaLabel: (name: string) =>
+        `Generar cuestionario adaptativo sobre ${name}`,
     },
     detailModal: {
+      generateQuiz: "Generar Cuestionario",
+      generateQuizHint:
+        "Se creará un cuestionario en el chat (sin soluciones). Envía tus respuestas allí para recibir corrección y nota.",
       title: "Detalle de la celda",
       close: "Cerrar",
       loading: "Cargando detalle…",
       error: "No se pudo cargar el detalle.",
       scoreLabel: "Puntuación total",
       quizPointsLabel: "Puntos por cuestionarios (máx. 7,5)",
-      actionPointsLabel: "Puntos por realizaciones (máx. 2,5)",
+      actionPointsLabel: "Puntos por preguntas al chat (máx. 2,5)",
       quizCount: (n: number) => `${n} cuestionario(s)`,
       quizAverage: (avg: string) => `Nota media: ${avg}`,
       noQuizzes: "Sin cuestionarios todavía",
-      videoCount: (n: number) => `${n} vídeo(s) visto(s)`,
       chatCount: (n: number) => `${n} pregunta(s) al chat`,
       historyTitle: "Histórico de actividades",
       emptyHistory: "Sin actividades registradas en esta celda.",

@@ -163,7 +163,7 @@ CATEGORÍAS (elige exactamente una):
 - CONVERSACION: Saludos, despedidas, charla casual, preguntas personales al asistente, agradecimientos. Incluye cuando el usuario da información sobre sí mismo o instrucciones sobre cómo comportarse.
 - PREGUNTA_DOCUMENTO: Preguntas específicas que requieren buscar información en documentos.
 - RESUMEN: Solicitudes de resumir, sintetizar o dar una visión general del contenido. ÚNICAMENTE si el usuario pide explícitamente un resumen.
-- EXAMEN: Solicitudes de crear un examen, test, cuestionario o evaluación escrita. ÚNICAMENTE si el usuario usa explícitamente esas palabras.
+- EXAMEN: Solicitudes de crear un examen, test, cuestionario, evaluación escrita o "evaluar unidad". Incluye peticiones desde el cuadrante de progreso (p. ej. "cuestionario adaptativo", "genera un examen sobre…").
 - APRENDIZAJE: Quiere aprender con tutoría guiada, estudiar paso a paso o practicar de forma conversacional (no un examen escrito de una vez).
 - OTRO: Instrucciones complejas, tareas multi-paso o cualquier cosa que no encaje; el agente libre la procesará.
 
@@ -183,7 +183,8 @@ CONSULTA ACTUAL DEL USUARIO:
 
 Reglas:
 - Si no estás seguro de la categoría, usa OTRO.
-- RESUMEN y EXAMEN solo si el usuario lo pide explícitamente en la consulta actual."""
+- RESUMEN solo si el usuario lo pide explícitamente en la consulta actual.
+- EXAMEN si pide examen, test, cuestionario, evaluación escrita o evaluar una unidad concreta."""
 
     try:
         structured_llm = llm.with_structured_output(RouteResult)
@@ -291,23 +292,40 @@ def get_exam_response(
     session_id: Optional[str] = None,
     max_tokens: int = 65535,
     route_context: str = "",
+    unit_name: Optional[str] = None,
+    unit_definition: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Genera un examen (preguntas con opciones y breve clave) a partir de los documentos."""
+    """Genera un examen escrito (sin soluciones) a partir de los documentos."""
     llm = get_model(temperature=0.35, max_output_tokens=max_tokens)
     if not llm:
         return {"answer": "No puedo generar el examen en este momento.", "source_documents": []}
     retriever = vector_store.as_retriever(
         search_type="mmr",
-        search_kwargs={"k": 150, "fetch_k": 450, "lambda_mult": 0.7},
+        search_kwargs={"k": 80, "fetch_k": 200, "lambda_mult": 0.65},
     )
     try:
-        docs = retriever.invoke(query)
+        # Si hay unidad del cuadrante, priorizar fragmentos de ESE tema en la búsqueda.
+        search_query = query
+        if unit_name or unit_definition:
+            search_query = f"{unit_name or ''} {unit_definition or ''} {query}".strip()
+        docs = retriever.invoke(search_query)
         if not docs:
             return {"answer": "No hay documentos disponibles para crear el examen.", "source_documents": []}
         context_parts = [f"[{d.metadata.get('source', 'Desconocido')}]\n{d.page_content}" for d in docs]
         context = "\n\n---\n\n".join(context_parts)
-        exam_prompt = f"""Eres un profesor que prepara un examen escrito a partir del material de referencia.
 
+        unit_scope_block = ""
+        if unit_name and unit_definition:
+            unit_scope_block = f"""
+ALCANCE OBLIGATORIO — EXCLUSIVAMENTE ESTA UNIDAD (no incluyas otros temas del curso):
+• Tema: {unit_name}
+• Definición / enfoque: {unit_definition}
+Todas las preguntas deben evaluar solo este contenido. Si un fragmento del material
+habla de otros temas, ignóralo para las preguntas.
+"""
+
+        exam_prompt = f"""Eres un profesor que prepara un examen escrito a partir del material de referencia.
+{unit_scope_block}
 CONTENIDO (fragmentos del material; pueden estar desordenados):
 {context}
 
@@ -315,12 +333,14 @@ PETICIÓN DEL ESTUDIANTE:
 {query}
 {build_context_block(route_context)}
 INSTRUCCIONES:
-1. Crea entre 8 y 12 preguntas que cubran los temas principales del material.
+1. Crea entre 6 y 10 preguntas{" sobre la unidad indicada" if unit_name else " que cubran los temas del material"}.
 2. Mezcla preguntas de opción múltiple (4 opciones: A, B, C, D) y 2-3 preguntas de desarrollo breve.
-3. No inventes datos que contradigan el material; si algo no aparece, omítelo o dilo explícitamente.
-4. Al final del examen, incluye una sección "Clave de respuestas" solo para las de opción múltiple.
+3. Respeta las restricciones de formato, tono y nivel indicadas en el contexto del usuario.
+4. No inventes datos que contradigan el material; si algo no aparece, omítelo o dilo explícitamente.
+5. NO incluyas soluciones, clave de respuestas ni pistas que revelen la respuesta correcta.
+6. Al final, indica al estudiante que puede copiar sus respuestas en el chat (por ejemplo "1B, 2A…" o el texto de desarrollo) para recibir corrección y nota.
 
-EXAMEN:"""
+EXAMEN (solo preguntas, sin soluciones):"""
         response = llm.invoke(exam_prompt)
         return {"answer": extract_text(response.content).strip(), "source_documents": docs}
     except Exception as e:

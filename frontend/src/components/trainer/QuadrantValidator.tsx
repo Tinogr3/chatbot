@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Loader2, Table2, Trash2 } from "lucide-react";
 import {
+  getTrainerLearningOutcomes,
   saveItinerary,
   type CourseItineraryCreate,
   type GeneratedItinerary,
+  type TrainerLearningOutcomeOption,
 } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useProjects } from "@/context/ProjectsContext";
@@ -21,7 +23,12 @@ export type QuadrantValidatorProps = {
 };
 
 /** Estado editable plano: el formador puede retocar cualquier campo. */
-type EditableUnit = { name: string; definition: string; weight: number };
+type EditableUnit = {
+  name: string;
+  definition: string;
+  weight: number;
+  learning_outcome_id: number | null;
+};
 type EditableTheme = { name: string; units: EditableUnit[] };
 
 function toEditable(itinerary: GeneratedItinerary): EditableTheme[] {
@@ -31,6 +38,7 @@ function toEditable(itinerary: GeneratedItinerary): EditableTheme[] {
       name: u.name,
       definition: u.definition,
       weight: u.weight,
+      learning_outcome_id: null,
     })),
   }));
 }
@@ -50,6 +58,27 @@ export default function QuadrantValidator({ itinerary, onSaved }: QuadrantValida
   const [themes, setThemes] = useState<EditableTheme[]>([]);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const [outcomes, setOutcomes] = useState<TrainerLearningOutcomeOption[]>([]);
+  const [outcomesLoading, setOutcomesLoading] = useState(false);
+
+  useEffect(() => {
+    if (!effectiveSessionId) return;
+    let cancelled = false;
+    setOutcomesLoading(true);
+    getTrainerLearningOutcomes(effectiveSessionId, accessToken)
+      .then((list) => {
+        if (!cancelled) setOutcomes(list);
+      })
+      .catch(() => {
+        if (!cancelled) setOutcomes([]);
+      })
+      .finally(() => {
+        if (!cancelled) setOutcomesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveSessionId, accessToken]);
 
   useEffect(() => {
     if (!itinerary) return;
@@ -121,6 +150,7 @@ export default function QuadrantValidator({ itinerary, onSaved }: QuadrantValida
           // El backend espera fracciones 0-1; la tabla muestra %
           weight: Math.max(0, Math.min(1, unit.weight / 100)),
           order_index: ui,
+          learning_outcome_id: unit.learning_outcome_id ?? undefined,
         })),
       })),
     };
@@ -188,11 +218,15 @@ export default function QuadrantValidator({ itinerary, onSaved }: QuadrantValida
       </div>
 
       <div className="flex-1 overflow-auto p-3">
+        {!outcomesLoading && outcomes.length === 0 && (
+          <p className="mb-3 text-xs text-amber-700 dark:text-amber-400">{t.noCompetencies}</p>
+        )}
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
               <th className="px-2 py-1.5">{t.unitHeader}</th>
               <th className="px-2 py-1.5">{t.definitionHeader}</th>
+              <th className="min-w-[180px] px-2 py-1.5">{t.competencyHeader}</th>
               <th className="w-20 px-2 py-1.5 text-right">{t.weightHeader}</th>
               <th className="w-8 px-1 py-1.5" />
             </tr>
@@ -200,7 +234,7 @@ export default function QuadrantValidator({ itinerary, onSaved }: QuadrantValida
           {themes.map((theme, ti) => (
             <tbody key={ti}>
               <tr>
-                <td colSpan={4} className="px-2 pb-1 pt-3">
+                <td colSpan={5} className="px-2 pb-1 pt-3">
                   <input
                     type="text"
                     value={theme.name}
@@ -230,6 +264,33 @@ export default function QuadrantValidator({ itinerary, onSaved }: QuadrantValida
                       rows={2}
                       className="w-full resize-y rounded border border-transparent bg-transparent px-1 py-0.5 text-xs text-gray-600 hover:border-gray-200 focus:border-emerald-400 focus:outline-none dark:text-gray-300 dark:hover:border-gray-700"
                     />
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <select
+                      value={unit.learning_outcome_id ?? ""}
+                      onChange={(e) =>
+                        updateUnit(ti, ui, {
+                          learning_outcome_id: e.target.value
+                            ? Number(e.target.value)
+                            : null,
+                        })
+                      }
+                      disabled={outcomesLoading}
+                      aria-label={`${t.competencyHeader} — ${unit.name}`}
+                      className="w-full max-w-[220px] rounded border border-gray-200 bg-white px-1.5 py-1 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+                    >
+                      <option value="">
+                        {outcomesLoading ? t.competencyLoading : t.competencyPlaceholder}
+                      </option>
+                      {outcomes.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.competency_name} › {o.subcompetency_name}:{" "}
+                          {o.description.length > 48
+                            ? `${o.description.slice(0, 48)}…`
+                            : o.description}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className="px-2 py-1.5 text-right">
                     <input

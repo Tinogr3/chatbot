@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
-import { getProgressQuadrant, type QuadrantResponse } from "@/lib/api";
+import { BrainCircuit, Loader2, RefreshCw } from "lucide-react";
+import { getProgressQuadrant, type QuadrantResponse, type QuadrantUnit } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useProjects } from "@/context/ProjectsContext";
 import ProgressDetailModal from "@/components/trainer/ProgressDetailModal";
+import { buildUnitQuizAction, dispatchChatAction, useProgressUpdated } from "@/lib/progressEvents";
 import { dictionaries } from "@/locales";
 
 const t = dictionaries.trainer.progress;
@@ -30,8 +31,12 @@ export default function StudentProgressDashboard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
+  const [selectedUnit, setSelectedUnit] = useState<QuadrantUnit | null>(null);
   const [localRefresh, setLocalRefresh] = useState(0);
+
+  useProgressUpdated(() => {
+    setLocalRefresh((n) => n + 1);
+  });
 
   const fetchQuadrant = useCallback(() => {
     if (!effectiveSessionId) return;
@@ -117,27 +122,45 @@ export default function StudentProgressDashboard({
               </h3>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {theme.units.map((unit) => (
-                  <button
+                  <div
                     key={unit.unit_id}
-                    type="button"
-                    onClick={() => setSelectedUnitId(unit.unit_id)}
-                    aria-label={t.cellAriaLabel(unit.name, unit.score)}
-                    title={unit.definition}
-                    className="group flex min-h-[84px] flex-col justify-between rounded-lg p-2.5 text-left text-white shadow-sm transition-transform hover:scale-[1.03] focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+                    className="group flex min-h-[84px] flex-col rounded-lg p-2.5 text-left text-white shadow-sm transition-transform hover:scale-[1.03]"
                     style={{ backgroundColor: unit.color_code }}
                   >
-                    <span className="line-clamp-2 text-xs font-medium leading-tight drop-shadow-sm">
-                      {unit.name}
-                    </span>
-                    <span className="flex items-baseline justify-between gap-1">
-                      <span className="text-lg font-bold drop-shadow-sm">
-                        {unit.score.toFixed(1)}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedUnit(unit)}
+                      aria-label={t.cellAriaLabel(unit.name, unit.score)}
+                      title={unit.definition}
+                      className="flex flex-1 flex-col justify-between text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 rounded"
+                    >
+                      <span className="line-clamp-2 text-xs font-medium leading-tight drop-shadow-sm">
+                        {unit.name}
                       </span>
-                      <span className="text-[10px] opacity-90">
-                        {unit.percent_complete.toFixed(0)}%
+                      <span className="flex items-baseline justify-between gap-1">
+                        <span className="text-lg font-bold drop-shadow-sm">
+                          {unit.score.toFixed(1)}
+                        </span>
+                        <span className="text-[10px] opacity-90">
+                          {unit.percent_complete.toFixed(0)}%
+                        </span>
                       </span>
-                    </span>
-                  </button>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dispatchChatAction(
+                          buildUnitQuizAction(unit.unit_id, unit.name, unit.definition),
+                        );
+                      }}
+                      aria-label={t.generateQuizAriaLabel(unit.name)}
+                      className="mt-2 flex w-full items-center justify-center gap-1 rounded bg-white/20 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition-opacity hover:bg-white/30 group-hover:opacity-100 focus:opacity-100"
+                    >
+                      <BrainCircuit className="h-3 w-3" aria-hidden="true" />
+                      {t.generateQuiz}
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -147,8 +170,8 @@ export default function StudentProgressDashboard({
 
       <ProgressDetailModal
         studentSessionId={effectiveSessionId}
-        unitId={selectedUnitId}
-        onClose={() => setSelectedUnitId(null)}
+        unit={selectedUnit}
+        onClose={() => setSelectedUnit(null)}
       />
     </section>
   );

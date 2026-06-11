@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { HelpCircle, ListChecks, Loader2, MessageSquare, Video, X } from "lucide-react";
-import { getUnitDetails, type UnitDetailsResponse } from "@/lib/api";
+import { BrainCircuit, HelpCircle, ListChecks, Loader2, MessageSquare, X } from "lucide-react";
+import { getUnitDetails, type QuadrantUnit, type UnitDetailsResponse } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useProjects } from "@/context/ProjectsContext";
+import { buildUnitQuizAction, dispatchChatAction } from "@/lib/progressEvents";
 import { dictionaries } from "@/locales";
 
 const t = dictionaries.trainer.detailModal;
 
 const ACTIVITY_ICONS = {
-  video: Video,
   chat_question: MessageSquare,
   quiz: ListChecks,
 } as const;
@@ -19,20 +19,21 @@ export type ProgressDetailModalProps = {
   /** Sesión del alumno cuyos logros se auditan. */
   studentSessionId: string;
   /** Unidad (celda) a detallar; null cierra el modal. */
-  unitId: number | null;
+  unit: QuadrantUnit | null;
   onClose: () => void;
 };
 
 /**
  * Modal de drill-down de una celda: hace fetch a
  * /trainer/progress/unit-details y muestra el histórico de actividades y
- * el desglose de la nota (quizzes 75% + realizaciones 25%).
+ * el desglose de la nota (cuestionarios 75% + preguntas al chat 25%).
  */
 export default function ProgressDetailModal({
   studentSessionId,
-  unitId,
+  unit,
   onClose,
 }: ProgressDetailModalProps) {
+  const unitId = unit?.unit_id ?? null;
   const { accessToken } = useAuth();
   const { effectiveSessionId } = useProjects();
 
@@ -63,7 +64,7 @@ export default function ProgressDetailModal({
     };
   }, [unitId, studentSessionId, effectiveSessionId, accessToken]);
 
-  if (unitId === null) return null;
+  if (unit === null || unitId === null) return null;
 
   return (
     <div
@@ -123,8 +124,29 @@ export default function ProgressDetailModal({
               </div>
             </div>
 
-            {/* Desglose de actividades */}
-            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            {unit && (
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 dark:border-emerald-900/40 dark:bg-emerald-500/5">
+                <p className="mb-2 text-xs text-gray-600 dark:text-gray-400">
+                  {t.generateQuizHint}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    dispatchChatAction(
+                      buildUnitQuizAction(unit.unit_id, unit.name, unit.definition),
+                    );
+                    onClose();
+                  }}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-600"
+                >
+                  <BrainCircuit className="h-4 w-4" aria-hidden="true" />
+                  {t.generateQuiz}
+                </button>
+              </div>
+            )}
+
+            {/* Desglose de actividades (sin vídeos) */}
+            <div className="grid grid-cols-2 gap-2 text-center text-xs">
               <div className="rounded-lg bg-gray-50 p-2 dark:bg-gray-800">
                 <ListChecks className="mx-auto mb-1 h-4 w-4 text-emerald-500" aria-hidden="true" />
                 <p className="font-medium text-gray-800 dark:text-gray-100">
@@ -134,12 +156,6 @@ export default function ProgressDetailModal({
                   {details.quiz_stats.average_score !== null
                     ? t.quizAverage(details.quiz_stats.average_score.toFixed(2))
                     : t.noQuizzes}
-                </p>
-              </div>
-              <div className="rounded-lg bg-gray-50 p-2 dark:bg-gray-800">
-                <Video className="mx-auto mb-1 h-4 w-4 text-emerald-500" aria-hidden="true" />
-                <p className="font-medium text-gray-800 dark:text-gray-100">
-                  {t.videoCount(details.video_count)}
                 </p>
               </div>
               <div className="rounded-lg bg-gray-50 p-2 dark:bg-gray-800">
@@ -159,7 +175,13 @@ export default function ProgressDetailModal({
                 <p className="text-sm text-gray-500 dark:text-gray-400">{t.emptyHistory}</p>
               ) : (
                 <ul className="space-y-1.5">
-                  {details.activities.map((activity) => {
+                  {details.activities
+                    .filter(
+                      (activity): activity is typeof activity & {
+                        activity_type: "chat_question" | "quiz";
+                      } => activity.activity_type !== "video",
+                    )
+                    .map((activity) => {
                     const Icon = ACTIVITY_ICONS[activity.activity_type] ?? HelpCircle;
                     return (
                       <li

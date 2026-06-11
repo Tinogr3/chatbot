@@ -208,6 +208,11 @@ class LearningOutcome(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    linked_units: Mapped[list[LearningUnit]] = relationship(
+        "LearningUnit",
+        back_populates="outcome_link",
+        foreign_keys="LearningUnit.learning_outcome_id",
+    )
 
     def __repr__(self) -> str:
         return f"<LearningOutcome id={self.id} weight={self.weight}>"
@@ -430,11 +435,22 @@ class LearningUnit(Base):
         doc="Peso fraccional de la unidad sobre el itinerario completo (0.0–1.0)",
     )
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    learning_outcome_id: Mapped[int | None] = mapped_column(
+        ForeignKey("learning_outcomes.id", ondelete="SET NULL"),
+        nullable=True,
+        doc="Enlace fuerte con el sistema de competencias",
+    )
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), nullable=False
     )
 
     theme: Mapped[Theme] = relationship(back_populates="learning_units")
+    outcome_link: Mapped[LearningOutcome | None] = relationship(
+        "LearningOutcome",
+        back_populates="linked_units",
+        foreign_keys=[learning_outcome_id],
+        lazy="selectin",
+    )
     activity_logs: Mapped[list[StudentActivityLog]] = relationship(
         back_populates="learning_unit",
         cascade="all, delete-orphan",
@@ -446,7 +462,10 @@ class LearningUnit(Base):
         lazy="selectin",
     )
 
-    __table_args__ = (Index("ix_learning_units_theme", "theme_id"),)
+    __table_args__ = (
+        Index("ix_learning_units_theme", "theme_id"),
+        Index("ix_learning_units_outcome", "learning_outcome_id"),
+    )
 
     def __repr__(self) -> str:
         return f"<LearningUnit id={self.id} name={self.name!r} weight={self.weight}>"

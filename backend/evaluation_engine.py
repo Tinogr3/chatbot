@@ -26,6 +26,22 @@ class EvaluationLLMOutput(BaseModel):
     feedback: str = Field(..., min_length=1, description="Retroalimentación constructiva y específica para el estudiante")
 
 
+class QuizEvaluationLLMOutput(BaseModel):
+    """Corrección detallada de un cuestionario enviado por el alumno."""
+
+    score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Nota global del cuestionario según aciertos y calidad (0.0–1.0)",
+    )
+    feedback: str = Field(
+        ...,
+        min_length=1,
+        description="Corrección pregunta a pregunta con aciertos, errores y respuestas correctas",
+    )
+
+
 _EVALUATION_SYSTEM_PROMPT = (
     "Eres un evaluador educativo estricto y justo. "
     "Tu tarea es evaluar la respuesta de un estudiante respecto a un resultado de aprendizaje esperado.\n\n"
@@ -36,6 +52,22 @@ _EVALUATION_SYSTEM_PROMPT = (
     "- 0.8–0.9: la respuesta es buena, demuestra dominio con detalles menores por mejorar.\n"
     "- 1.0: la respuesta demuestra dominio completo del resultado de aprendizaje.\n\n"
     "Devuelve siempre una puntuación (score) y retroalimentación (feedback) constructiva."
+)
+
+_QUIZ_EVALUATION_SYSTEM_PROMPT = (
+    "Eres un profesor corrigiendo un cuestionario escrito. "
+    "Recibirás el tema/unidad, el texto del cuestionario entregado al alumno "
+    "(sin clave de respuestas) y las respuestas del alumno.\n\n"
+    "Tu tarea:\n"
+    "1. Revisa cada pregunta del cuestionario en orden.\n"
+    "2. Para opción múltiple: indica si la letra elegida es correcta; si no, "
+    "explica brevemente y da la opción correcta.\n"
+    "3. Para desarrollo breve: indica si es correcta, parcial o incorrecta; "
+    "señala errores y aporta la respuesta esperada según el material.\n"
+    "4. Calcula un score global 0.0–1.0 proporcional a aciertos y calidad.\n"
+    "5. Estructura el feedback en markdown con una sección por pregunta "
+    "(### Pregunta N) y un resumen final con qué repasar.\n\n"
+    "Sé justo, específico y pedagógico."
 )
 
 
@@ -85,5 +117,32 @@ class EvaluationService:
         result: Optional[EvaluationLLMOutput] = structured_llm.invoke(prompt)
         if result is None:
             raise RuntimeError("El LLM no devolvió una evaluación válida.")
+
+        return {"score": result.score, "feedback": result.feedback}
+
+    @staticmethod
+    def evaluate_quiz_submission(
+        unit_scope: str,
+        exam_text: str,
+        student_answers: str,
+    ) -> dict:
+        """Corrige un cuestionario completo enviado por el alumno en el chat.
+
+        Returns:
+            dict con claves ``"score"`` (float 0.0–1.0) y ``"feedback"`` (str).
+        """
+        llm = EvaluationService._get_llm()
+        structured_llm = llm.with_structured_output(QuizEvaluationLLMOutput)
+
+        prompt = (
+            f"{_QUIZ_EVALUATION_SYSTEM_PROMPT}\n\n"
+            f"UNIDAD / TEMA:\n{unit_scope}\n\n"
+            f"CUESTIONARIO ENTREGADO AL ALUMNO:\n{exam_text}\n\n"
+            f"RESPUESTAS DEL ALUMNO:\n{student_answers}"
+        )
+
+        result: Optional[QuizEvaluationLLMOutput] = structured_llm.invoke(prompt)
+        if result is None:
+            raise RuntimeError("El LLM no devolvió una corrección válida del cuestionario.")
 
         return {"score": result.score, "feedback": result.feedback}

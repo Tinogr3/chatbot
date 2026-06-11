@@ -20,6 +20,11 @@ class ChatRequest(BaseModel):
     learning_mode: bool = Field(False, description="Si está en modo aprendizaje")
     learning_topic: Optional[str] = Field(None, description="Tema actual en modo aprendizaje")
     last_learning_content: Optional[str] = Field(None, description="Último contenido del tutor en modo aprendizaje")
+    learning_unit_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Celda del cuadrante asociada (cuestionario/evaluación de unidad)",
+    )
 
 
 class ChatResponse(BaseModel):
@@ -612,6 +617,11 @@ class LearningUnitBase(BaseModel):
         description="Peso fraccional sobre el itinerario completo (0.0–1.0)",
     )
     order_index: int = Field(0, ge=0, description="Posición dentro del tema")
+    learning_outcome_id: Optional[int] = Field(
+        None,
+        gt=0,
+        description="ID del resultado de aprendizaje (competencia) que evalúa esta celda",
+    )
 
 
 class LearningUnitCreate(LearningUnitBase):
@@ -625,6 +635,7 @@ class LearningUnitUpdate(BaseModel):
     definition: Optional[str] = Field(None, min_length=1)
     weight: Optional[float] = Field(None, ge=0.0, le=1.0)
     order_index: Optional[int] = Field(None, ge=0)
+    learning_outcome_id: Optional[int] = Field(None, gt=0)
 
 
 class LearningUnitRead(LearningUnitBase):
@@ -807,6 +818,16 @@ class SaveItineraryResponse(BaseModel):
     theme_count: int = Field(..., ge=0)
     unit_count: int = Field(..., ge=0)
     message: str
+
+
+class TrainerLearningOutcomeOption(BaseModel):
+    """Opción de competencia para enlazar una celda del cuadrante."""
+
+    id: int = Field(..., description="ID del learning outcome")
+    description: str = Field(..., description="Descripción del resultado de aprendizaje")
+    competency_name: str = Field(..., description="Competencia raíz")
+    subcompetency_name: str = Field(..., description="Subcompetencia")
+    document_id: str = Field(..., description="Documento de origen")
 
 
 # ----- Cuadrante de progreso (dashboard formador) -----

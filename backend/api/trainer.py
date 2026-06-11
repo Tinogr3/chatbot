@@ -36,9 +36,12 @@ from database import get_db
 from logger import get_logger
 from models import (
     ActivityType,
+    Competency,
     CourseItinerary,
+    LearningOutcome,
     LearningUnit,
     StudentActivityLog,
+    Subcompetency,
     Theme,
     UnitProgress,
 )
@@ -51,6 +54,7 @@ from schemas import (
     QuadrantUnit,
     SaveItineraryResponse,
     StudentActivityLogRead,
+    TrainerLearningOutcomeOption,
     UnitDetailsQuizStats,
     UnitDetailsResponse,
 )
@@ -156,6 +160,63 @@ def _generate_itinerary_sync(prompt: str, rag_context: str) -> Optional[Generate
 
 
 # ---------------------------------------------------------------------------
+# Competencias disponibles para enlazar celdas del cuadrante
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/learning-outcomes",
+    response_model=List[TrainerLearningOutcomeOption],
+    summary="Lista de resultados de aprendizaje enlazables a celdas del cuadrante",
+)
+async def list_learning_outcomes(
+    session_id: str = Depends(get_validated_session),
+    db: AsyncSession = Depends(get_db),
+) -> List[TrainerLearningOutcomeOption]:
+    """Devuelve los learning outcomes de los documentos de la sesión del formador."""
+    from document_registry import load_document_registry
+
+    registry = load_document_registry(session_id)
+    doc_keys = list(registry.keys()) if registry else []
+    if not doc_keys:
+        return []
+
+    try:
+        rows = (
+            await db.execute(
+                select(
+                    LearningOutcome.id,
+                    LearningOutcome.description,
+                    Subcompetency.name,
+                    Competency.name,
+                    Competency.document_id,
+                )
+                .join(Subcompetency, LearningOutcome.subcompetency_id == Subcompetency.id)
+                .join(Competency, Subcompetency.competency_id == Competency.id)
+                .where(Competency.document_id.in_(doc_keys))
+                .order_by(Competency.document_id, Competency.name, Subcompetency.name, LearningOutcome.id)
+            )
+        ).all()
+    except SQLAlchemyError as exc:
+        logger.exception("Error listando learning outcomes (session=%s)", session_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Error consultando las competencias disponibles.",
+        ) from exc
+
+    return [
+        TrainerLearningOutcomeOption(
+            id=row[0],
+            description=row[1],
+            subcompetency_name=row[2],
+            competency_name=row[3],
+            document_id=row[4] or "",
+        )
+        for row in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Fase 2: generación y guardado del itinerario
 # ---------------------------------------------------------------------------
 
@@ -255,6 +316,7 @@ async def save_itinerary(
                         definition=unit_data.definition.strip(),
                         weight=normalized_weight,
                         order_index=unit_data.order_index or u_idx,
+                        learning_outcome_id=unit_data.learning_outcome_id,
                     )
                 )
                 unit_count += 1

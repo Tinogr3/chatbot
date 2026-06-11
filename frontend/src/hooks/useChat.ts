@@ -41,6 +41,7 @@ export function useChat(options: UseChatOptions = {}) {
   const [error, setError] = useState<Error | null>(null);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [isLearningMode, setIsLearningMode] = useState(false);
+  const [activeLearningUnitId, setActiveLearningUnitId] = useState<number | undefined>();
 
   useEffect(() => {
     let cancelled = false;
@@ -70,9 +71,11 @@ export function useChat(options: UseChatOptions = {}) {
   }, [sessionId, accessToken]);
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, options?: { learning_unit_id?: number }) => {
       const trimmed = text.trim();
       if (!trimmed || isLoading || !sessionId) return;
+
+      const learningUnitId = options?.learning_unit_id ?? activeLearningUnitId;
 
       const userMessage: ChatMessage = {
         id: `user-${Date.now()}`,
@@ -84,7 +87,15 @@ export function useChat(options: UseChatOptions = {}) {
       setError(null);
 
       try {
-        const data = await apiChat(trimmed, sessionId, { learning_mode: isLearningMode }, accessToken);
+        const data = await apiChat(
+          trimmed,
+          sessionId,
+          { learning_mode: isLearningMode, learning_unit_id: learningUnitId },
+          accessToken,
+        );
+        if (options?.learning_unit_id !== undefined) {
+          setActiveLearningUnitId(options.learning_unit_id);
+        }
         const assistantMessage: ChatMessage = {
           id: `assistant-${Date.now()}`,
           role: "assistant",
@@ -107,7 +118,7 @@ export function useChat(options: UseChatOptions = {}) {
         setIsLoading(false);
       }
     },
-    [sessionId, isLoading, isLearningMode, onError, accessToken],
+    [sessionId, isLoading, isLearningMode, activeLearningUnitId, onError, accessToken],
   );
 
   const clearMessages = useCallback(() => {
