@@ -121,11 +121,6 @@ export function useChat(options: UseChatOptions = {}) {
     [sessionId, isLoading, isLearningMode, activeLearningUnitId, onError, accessToken],
   );
 
-  const clearMessages = useCallback(() => {
-    setMessages([]);
-    setError(null);
-  }, []);
-
   const toggleLearningMode = useCallback(() => {
     setIsLearningMode((prev) => !prev);
   }, []);
@@ -135,7 +130,6 @@ export function useChat(options: UseChatOptions = {}) {
     isLoading,
     error,
     sendMessage,
-    clearMessages,
     historyLoaded,
     isLearningMode,
     toggleLearningMode,

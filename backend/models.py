@@ -22,6 +22,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    Column,
     DateTime,
     Enum,
     Float,
@@ -29,6 +30,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Table,
     Text,
     func,
 )
@@ -40,6 +42,75 @@ from database import Base
 # ---------------------------------------------------------------------------
 # Usuarios y tokens de refresco (autenticación JWT)
 # ---------------------------------------------------------------------------
+
+class UserRole(str, enum.Enum):
+    """Rol de la cuenta en el sistema educativo."""
+
+    FORMADOR = "formador"
+    ALUMNO = "alumno"
+
+
+trainer_students_association = Table(
+    "trainer_students_association",
+    Base.metadata,
+    Column(
+        "trainer_id",
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "student_id",
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+trainer_project_students_association = Table(
+    "trainer_project_students",
+    Base.metadata,
+    Column(
+        "trainer_project_id",
+        Integer,
+        ForeignKey("trainer_projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "student_id",
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+class TrainerProject(Base):
+    """Proyecto/curso del formador compartido con alumnos (RAG + itinerario por sesión)."""
+
+    __tablename__ = "trainer_projects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trainer_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    session_id: Mapped[str] = mapped_column(
+        String(255), unique=True, nullable=False, index=True,
+        doc="Sesión backend del proyecto (username__projectId del formador)",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), nullable=False
+    )
+
+    trainer: Mapped[User] = relationship(back_populates="trainer_projects")
+    students: Mapped[list[User]] = relationship(
+        "User",
+        secondary=trainer_project_students_association,
+        back_populates="shared_trainer_projects",
+    )
+
 
 class User(Base):
     """Cuenta de usuario. La contraseña se almacena hasheada con bcrypt."""
@@ -54,6 +125,17 @@ class User(Base):
         String(255), unique=True, nullable=True, index=True
     )
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(
+            UserRole,
+            values_callable=lambda e: [m.value for m in e],
+            native_enum=False,
+            length=20,
+        ),
+        default=UserRole.ALUMNO,
+        server_default=UserRole.ALUMNO.value,
+        nullable=False,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     failed_login_attempts: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False
@@ -69,9 +151,32 @@ class User(Base):
         cascade="all, delete-orphan",
         lazy="dynamic",
     )
+    students: Mapped[list[User]] = relationship(
+        "User",
+        secondary=trainer_students_association,
+        primaryjoin="User.id == trainer_students_association.c.trainer_id",
+        secondaryjoin="User.id == trainer_students_association.c.student_id",
+        back_populates="trainers",
+    )
+    trainers: Mapped[list[User]] = relationship(
+        "User",
+        secondary=trainer_students_association,
+        primaryjoin="User.id == trainer_students_association.c.student_id",
+        secondaryjoin="User.id == trainer_students_association.c.trainer_id",
+        back_populates="students",
+    )
+    trainer_projects: Mapped[list[TrainerProject]] = relationship(
+        back_populates="trainer",
+        cascade="all, delete-orphan",
+    )
+    shared_trainer_projects: Mapped[list[TrainerProject]] = relationship(
+        "TrainerProject",
+        secondary=trainer_project_students_association,
+        back_populates="students",
+    )
 
     def __repr__(self) -> str:
-        return f"<User id={self.id} username={self.username!r}>"
+        return f"<User id={self.id} username={self.username!r} role={self.role.value}>"
 
 
 class RefreshToken(Base):

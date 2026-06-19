@@ -10,14 +10,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.evaluation import record_learning_progress
-from auth import get_validated_session
+from auth import get_current_user, get_validated_session
 from chat_manager import ChatHistoryManager
 from discovery_repo import add_stored_exam, add_stored_summary
 from database import get_db
 from document_registry import load_document_registry
 from logger import get_logger
 from evaluation_engine import EvaluationService
-from models import Competency, LearningOutcome, LearningUnit, Subcompetency
+from models import Competency, LearningOutcome, LearningUnit, Subcompetency, User
 from rag_engine import initialize_agent, initialize_vector_store_async
 from router import (
     QueryCategory,
@@ -324,11 +324,18 @@ async def _find_learning_outcome_for_sources(
 async def chat(
     body: ChatRequest,
     session_id: str = Depends(get_validated_session),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
+    from services.trainer_project_service import progress_session_for_user
+
     prompt = (body.message or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="message vacío")
+
+    progress_sid = await progress_session_for_user(
+        db, user=current_user, validated_session_id=session_id
+    )
 
     temperature = body.temperature
     max_tokens = body.max_tokens
@@ -345,7 +352,7 @@ async def chat(
         chat_history_early = await chat_manager.get_history(session_id)
         quiz_result = await _try_evaluate_quiz_submission(
             db,
-            session_id=session_id,
+            session_id=progress_sid,
             learning_unit_id=learning_unit_id,
             prompt=prompt,
             chat_history=chat_history_early,
@@ -446,7 +453,7 @@ async def chat(
                 if unit_id is not None:
                     await ProgressService.log_activity_and_update_progress(
                         db,
-                        session_id=session_id,
+                        session_id=progress_sid,
                         unit_id=unit_id,
                         activity_type=_ActivityType.QUIZ,
                         score=quiz_score,
@@ -587,7 +594,7 @@ async def chat(
 
                     await _log_unit_activity_best_effort(
                         db,
-                        session_id=session_id,
+                        session_id=progress_sid,
                         text=prompt,
                         activity_type=_ActivityType.CHAT_QUESTION,
                         detail=prompt[:500],

@@ -14,7 +14,7 @@ const tConfirm = t.confirmClear;
 type ToastState = { message: string; type: "success" | "error" } | null;
 
 export default function UserSettings() {
-  const { accessToken, logout: authLogout } = useAuth();
+  const { accessToken, logout: authLogout, user } = useAuth();
   const { sessionId, logout } = useUser();
   const { projects, effectiveSessionId, clearAllProjects } = useProjects();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -176,7 +176,9 @@ export default function UserSettings() {
             </div>
             <div className="px-5 py-4">
               <p id="confirm-clear-description" className="text-sm text-gray-600 dark:text-gray-300">
-                {tConfirm.description}
+                {user?.role === "formador"
+                  ? tConfirm.descriptionFormador
+                  : tConfirm.description}
               </p>
             </div>
             <div className="flex items-center justify-end gap-2 px-5 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700">

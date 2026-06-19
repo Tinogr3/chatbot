@@ -1,8 +1,10 @@
 """
-Endpoint de estado de tareas asíncronas - GET /status/{task_id}
+Consulta del estado de tareas Celery (upload, vídeo, nube).
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from auth import get_current_user
+from models import User
 from schemas import TaskStatusResponse
 from worker import get_task_result
 
@@ -10,8 +12,10 @@ router = APIRouter(prefix="/status", tags=["tasks"])
 
 
 @router.get("/{task_id}", response_model=TaskStatusResponse)
-def get_task_status(task_id: str) -> TaskStatusResponse:
-    """Consulta el estado y progreso de una tarea encolada (upload PDF o process_video)."""
+async def get_task_status(
+    task_id: str,
+    _user: User = Depends(get_current_user),
+) -> TaskStatusResponse:
     result = get_task_result(task_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
@@ -28,7 +32,9 @@ def get_task_status(task_id: str) -> TaskStatusResponse:
         message = meta.get("message")
 
     if status == "SUCCESS" and result.result:
-        result_payload = result.result if isinstance(result.result, dict) else {"result": result.result}
+        result_payload = (
+            result.result if isinstance(result.result, dict) else {"result": result.result}
+        )
         progress = 1.0
 
     if status == "FAILURE":

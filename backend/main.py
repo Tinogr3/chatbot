@@ -39,6 +39,7 @@ from api.evaluation import router as evaluation_router
 from api.dashboard import router as dashboard_router
 from api.discovery import router as discovery_router
 from api.trainer import router as trainer_router
+from api.student import router as student_router
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -96,8 +97,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(_http.allowed_origins),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Session-Id", "X-Project-Document-Keys"],
 )
 
 app.include_router(auth_router)
@@ -112,6 +113,7 @@ app.include_router(evaluation_router)
 app.include_router(dashboard_router)
 app.include_router(discovery_router)
 app.include_router(trainer_router)
+app.include_router(student_router)
 
 
 @app.get("/health")

@@ -7,6 +7,7 @@ import ProjectsPanel from "@/components/sidebar/ProjectsPanel";
 import UserSettings from "@/components/sidebar/UserSettings";
 import { useUser } from "@/context/UserContext";
 import { useProjects } from "@/context/ProjectsContext";
+import { useAuth } from "@/context/AuthContext";
 import { dictionaries } from "@/locales";
 
 const t = dictionaries.sidebar;
@@ -14,7 +15,10 @@ const tCommon = dictionaries.common;
 
 export default function LeftSidebar() {
   const { sessionId } = useUser();
+  const { user } = useAuth();
   const { currentProject, effectiveSessionId } = useProjects();
+  const isReadOnlyProject = Boolean(currentProject?.readOnly);
+  const canUpload = user?.role !== "alumno" || !isReadOnlyProject;
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -32,14 +36,16 @@ export default function LeftSidebar() {
       </header>
 
       <div className="p-4 space-y-3 border-b border-gray-100 dark:border-gray-800">
-        <button
-          type="button"
-          onClick={() => setUploadModalOpen(true)}
-          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-emerald-200 dark:border-emerald-700/50 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-sm font-medium hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-colors"
-        >
-          <Plus className="w-4 h-4 shrink-0" />
-          {t.newKnowledgeButton}
-        </button>
+        {canUpload && (
+          <button
+            type="button"
+            onClick={() => setUploadModalOpen(true)}
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-emerald-200 dark:border-emerald-700/50 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-sm font-medium hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-colors"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            {t.newKnowledgeButton}
+          </button>
+        )}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
           <input

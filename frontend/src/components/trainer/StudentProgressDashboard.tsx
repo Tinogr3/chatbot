@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { BrainCircuit, Loader2, RefreshCw } from "lucide-react";
-import { getProgressQuadrant, type QuadrantResponse, type QuadrantUnit } from "@/lib/api";
+import {
+  getMyProgressQuadrant,
+  getMyStudents,
+  getProgressQuadrant,
+  type QuadrantResponse,
+  type QuadrantUnit,
+} from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useProjects } from "@/context/ProjectsContext";
 import ProgressDetailModal from "@/components/trainer/ProgressDetailModal";
@@ -14,18 +20,20 @@ const t = dictionaries.trainer.progress;
 export type StudentProgressDashboardProps = {
   /** Cambia para forzar un refetch (ej. tras guardar un itinerario). */
   refreshKey?: number;
+  /** Vista del formador: elige el alumno cuyo progreso se muestra. */
+  trainerMode?: boolean;
 };
 
 /**
  * Cuadrante visual de progreso (heatmap): cada celda es una unidad de
- * aprendizaje pintada con su color_code y su puntuación 0-10. Clic en una
- * celda → modal con el detalle del histórico.
+ * aprendizaje pintada con su color_code y su puntuación 0-10.
  */
 export default function StudentProgressDashboard({
   refreshKey = 0,
+  trainerMode = false,
 }: StudentProgressDashboardProps) {
-  const { accessToken } = useAuth();
-  const { effectiveSessionId } = useProjects();
+  const { accessToken, user } = useAuth();
+  const { effectiveSessionId, isSharedCourseActive } = useProjects();
 
   const [quadrant, setQuadrant] = useState<QuadrantResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,27 +41,72 @@ export default function StudentProgressDashboard({
   const [notFound, setNotFound] = useState(false);
   const [selectedUnit, setSelectedUnit] = useState<QuadrantUnit | null>(null);
   const [localRefresh, setLocalRefresh] = useState(0);
+  const [assignedStudents, setAssignedStudents] = useState<{ id: number; username: string }[]>([]);
+  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
+
+  const studentSessionId = trainerMode ? selectedStudent : user?.username ?? null;
 
   useProgressUpdated(() => {
     setLocalRefresh((n) => n + 1);
   });
 
+  useEffect(() => {
+    if (!trainerMode || !effectiveSessionId) return;
+    let cancelled = false;
+    getMyStudents(effectiveSessionId, accessToken)
+      .then((res) => {
+        if (cancelled) return;
+        const list = res.students.map((s) => ({ id: s.id, username: s.username }));
+        setAssignedStudents(list);
+        setSelectedStudent((prev) => prev ?? list[0]?.username ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setAssignedStudents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [trainerMode, effectiveSessionId, accessToken, refreshKey]);
+
   const fetchQuadrant = useCallback(() => {
     if (!effectiveSessionId) return;
+    if (!trainerMode && !isSharedCourseActive) {
+      setLoading(false);
+      setQuadrant(null);
+      setNotFound(false);
+      setError(null);
+      return;
+    }
+    if (trainerMode && !selectedStudent) {
+      setLoading(false);
+      setQuadrant(null);
+      setNotFound(false);
+      setError(null);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setError(null);
     setNotFound(false);
 
-    getProgressQuadrant(effectiveSessionId, effectiveSessionId, accessToken)
+    const request = trainerMode
+      ? getProgressQuadrant(selectedStudent!, effectiveSessionId, accessToken)
+      : getMyProgressQuadrant(effectiveSessionId, accessToken);
+
+    request
       .then((res) => {
         if (!cancelled) setQuadrant(res);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : t.error;
-        // El backend devuelve 404 con detalle claro si no hay itinerario
-        if (message.toLowerCase().includes("no hay itinerario")) {
+        const lower = message.toLowerCase();
+        if (
+          lower.includes("no hay itinerario") ||
+          lower.includes("no tienes un formador") ||
+          lower.includes("no tienes formador")
+        ) {
           setNotFound(true);
         } else {
           setError(message);
@@ -67,7 +120,7 @@ export default function StudentProgressDashboard({
     return () => {
       cancelled = true;
     };
-  }, [effectiveSessionId, accessToken]);
+  }, [effectiveSessionId, accessToken, trainerMode, selectedStudent, isSharedCourseActive]);
 
   useEffect(() => {
     const cancel = fetchQuadrant();
@@ -75,10 +128,11 @@ export default function StudentProgressDashboard({
   }, [fetchQuadrant, refreshKey, localRefresh]);
 
   if (!effectiveSessionId) return null;
+  if (!trainerMode && !isSharedCourseActive) return null;
 
   return (
     <section className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
             {t.title}
@@ -91,15 +145,33 @@ export default function StudentProgressDashboard({
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => setLocalRefresh((n) => n + 1)}
-          aria-label={t.refresh}
-          title={t.refresh}
-          className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-        >
-          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-        </button>
+        <div className="flex items-center gap-2">
+          {trainerMode && assignedStudents.length > 0 && (
+            <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+              <span className="sr-only">{t.selectStudent}</span>
+              <select
+                value={selectedStudent ?? ""}
+                onChange={(e) => setSelectedStudent(e.target.value || null)}
+                className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-900"
+              >
+                {assignedStudents.map((s) => (
+                  <option key={s.id} value={s.username}>
+                    {s.username}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <button
+            type="button"
+            onClick={() => setLocalRefresh((n) => n + 1)}
+            aria-label={t.refresh}
+            title={t.refresh}
+            className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+          >
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -107,8 +179,12 @@ export default function StudentProgressDashboard({
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
           {t.loading}
         </div>
+      ) : trainerMode && assignedStudents.length === 0 ? (
+        <p className="py-6 text-sm text-gray-500 dark:text-gray-400">{t.noStudentsAssigned}</p>
       ) : notFound ? (
-        <p className="py-6 text-sm text-gray-500 dark:text-gray-400">{t.emptyState}</p>
+        <p className="py-6 text-sm text-gray-500 dark:text-gray-400">
+          {trainerMode ? t.emptyState : t.noTrainer}
+        </p>
       ) : error ? (
         <p className="py-6 text-sm text-red-600 dark:text-red-400" role="alert">
           {error}
@@ -132,7 +208,7 @@ export default function StudentProgressDashboard({
                       onClick={() => setSelectedUnit(unit)}
                       aria-label={t.cellAriaLabel(unit.name, unit.score)}
                       title={unit.definition}
-                      className="flex flex-1 flex-col justify-between text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80 rounded"
+                      className="flex flex-1 flex-col justify-between rounded text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
                     >
                       <span className="line-clamp-2 text-xs font-medium leading-tight drop-shadow-sm">
                         {unit.name}
@@ -168,11 +244,13 @@ export default function StudentProgressDashboard({
         </div>
       ) : null}
 
-      <ProgressDetailModal
-        studentSessionId={effectiveSessionId}
-        unit={selectedUnit}
-        onClose={() => setSelectedUnit(null)}
-      />
+      {studentSessionId && (
+        <ProgressDetailModal
+          studentSessionId={studentSessionId}
+          unit={selectedUnit}
+          onClose={() => setSelectedUnit(null)}
+        />
+      )}
     </section>
   );
 }

@@ -177,6 +177,7 @@ function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [role, setRole] = useState<"ALUMNO" | "FORMADOR">("ALUMNO");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -193,7 +194,11 @@ function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void }) {
 
     setLoading(true);
     try {
-      await register(username.trim().toLowerCase(), password);
+      await register(
+        username.trim().toLowerCase(),
+        password,
+        role === "FORMADOR" ? "formador" : "alumno",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al crear la cuenta.");
     } finally {
@@ -259,6 +264,46 @@ function RegisterForm({ onSwitchToLogin }: { onSwitchToLogin: () => void }) {
         describedBy={error ? errorId : undefined}
         invalid={!!error}
       />
+
+      <fieldset className="space-y-2">
+        <legend className="text-xs font-medium text-gray-600 dark:text-gray-300">
+          {tR.roleLabel}
+        </legend>
+        <div
+          className="grid grid-cols-2 gap-2 rounded-xl bg-gray-100 p-1 dark:bg-gray-800"
+          role="radiogroup"
+          aria-label={tR.roleLabel}
+        >
+          {(
+            [
+              { value: "ALUMNO" as const, label: tR.roleStudent },
+              { value: "FORMADOR" as const, label: tR.roleTrainer },
+            ] as const
+          ).map((option) => {
+            const selected = role === option.value;
+            return (
+              <label
+                key={option.value}
+                className={`cursor-pointer rounded-lg px-3 py-2.5 text-center text-sm font-medium transition-colors ${
+                  selected
+                    ? "bg-emerald-500 text-white shadow-sm"
+                    : "text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="role"
+                  value={option.value}
+                  checked={selected}
+                  onChange={() => setRole(option.value)}
+                  className="sr-only"
+                />
+                {option.label}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
 
       {error && (
         <div

@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ----- Chat -----
@@ -899,6 +899,13 @@ _PASSWORD_RE = re.compile(
 _USERNAME_RE = re.compile(r"^[a-z0-9_-]{3,50}$")
 
 
+class UserRoleEnum(str, Enum):
+    """Rol de usuario expuesto en la API."""
+
+    FORMADOR = "formador"
+    ALUMNO = "alumno"
+
+
 class UserCreate(BaseModel):
     """Body de POST /auth/register."""
 
@@ -912,6 +919,10 @@ class UserCreate(BaseModel):
         ...,
         min_length=8,
         description="Mínimo 8 caracteres con mayúscula, minúscula, dígito y carácter especial",
+    )
+    role: UserRoleEnum = Field(
+        default=UserRoleEnum.ALUMNO,
+        description="Rol del usuario: formador o alumno",
     )
 
     @field_validator("username", mode="before")
@@ -973,4 +984,65 @@ class UserOut(BaseModel):
     id: int
     username: str
     email: Optional[str] = None
+    role: UserRoleEnum
     created_at: datetime
+
+
+class AssignStudentRequest(BaseModel):
+    """Body para asignar un alumno a un formador."""
+
+    student_id: Optional[int] = Field(
+        None, gt=0, description="ID del usuario alumno a asignar"
+    )
+    student_username: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=50,
+        description="Username del alumno a asignar",
+    )
+
+    @field_validator("student_username", mode="before")
+    @classmethod
+    def normalize_student_username(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
+    @model_validator(mode="after")
+    def require_student_identifier(self) -> "AssignStudentRequest":
+        if self.student_id is None and not (self.student_username or "").strip():
+            raise ValueError("Indica student_id o student_username.")
+        return self
+
+
+class StudentListResponse(BaseModel):
+    """Lista de alumnos asignados a un formador."""
+
+    students: List[UserOut] = Field(
+        default_factory=list,
+        description="Alumnos vinculados al formador",
+    )
+
+
+class SharedProjectDocument(BaseModel):
+    """Documento disponible en un curso compartido."""
+
+    name: str
+    doc_key: str
+    source: str = Field(description="manual | cloud | youtube")
+
+
+class SharedProjectRead(BaseModel):
+    """Curso/proyecto del formador visible para el alumno."""
+
+    id: int
+    name: str
+    session_id: str
+    trainer_username: str
+    documents: List[SharedProjectDocument] = Field(default_factory=list)
+
+
+class SharedProjectsResponse(BaseModel):
+    """Lista de cursos compartidos con el alumno."""
+
+    projects: List[SharedProjectRead] = Field(default_factory=list)

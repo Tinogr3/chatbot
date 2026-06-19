@@ -31,9 +31,10 @@ from auth import (
     validate_and_rotate_refresh_token,
     verify_password,
 )
+from config import get_app_settings
 from database import get_db
 from logger import get_logger
-from models import User
+from models import User, UserRole
 from schemas import TokenResponse, UserCreate, UserLogin, UserOut
 
 logger = get_logger("api.auth")
@@ -44,11 +45,12 @@ _COOKIE_MAX_AGE = REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
+    secure = get_app_settings().cookie_secure
     response.set_cookie(
         key=_REFRESH_COOKIE,
         value=token,
         httponly=True,
-        secure=True,
+        secure=secure,
         samesite="strict",
         max_age=_COOKIE_MAX_AGE,
         path="/auth",
@@ -56,10 +58,11 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
 
 
 def _clear_refresh_cookie(response: Response) -> None:
+    secure = get_app_settings().cookie_secure
     response.delete_cookie(
         key=_REFRESH_COOKIE,
         httponly=True,
-        secure=True,
+        secure=secure,
         samesite="strict",
         path="/auth",
     )
@@ -92,6 +95,7 @@ async def register(
     user = User(
         username=body.username,
         hashed_password=hash_password(body.password),
+        role=UserRole(body.role.value),
     )
     db.add(user)
     await db.flush()

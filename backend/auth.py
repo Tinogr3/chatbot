@@ -24,8 +24,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import RefreshToken, User
-from session_ids import normalize_session_id
+from models import RefreshToken, User, UserRole
+from session_ids import normalize_session_id, owner_username_from_session
 
 # ---------------------------------------------------------------------------
 # Configuración (leer siempre de entorno, NUNCA harcodear)
@@ -133,16 +133,41 @@ async def get_current_user(
     return user
 
 
+async def require_formador(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Solo permite acceso a usuarios con rol FORMADOR."""
+    if current_user.role != UserRole.FORMADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los formadores pueden acceder a este recurso.",
+        )
+    return current_user
+
+
+async def require_alumno(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Solo permite acceso a usuarios con rol ALUMNO."""
+    if current_user.role != UserRole.ALUMNO:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo los alumnos pueden acceder a este recurso.",
+        )
+    return current_user
+
+
 async def get_validated_session(
     x_session_id: Optional[str] = Header(None, alias="X-Session-Id"),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> str:
     """
-    Valida que el X-Session-Id pertenece al usuario autenticado y devuelve el
-    session_id normalizado. Previene el acceso horizontal entre usuarios.
-
-    Formato esperado: '<username>__<project_id>'  o  '<username>'
+    Valida que el X-Session-Id pertenece al usuario autenticado o a un curso
+    compartido del formador (alumno asignado) y devuelve el session_id normalizado.
     """
+    from services.trainer_project_service import user_can_access_session
+
     session_id = normalize_session_id(x_session_id or "")
     if not session_id:
         raise HTTPException(
@@ -150,18 +175,13 @@ async def get_validated_session(
             detail="Header X-Session-Id requerido.",
         )
 
-    expected_prefix = current_user.username
-    owns_session = (
-        session_id == expected_prefix
-        or session_id.startswith(f"{expected_prefix}__")
-    )
-    if not owns_session:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="No tienes permiso para acceder a esta sesión.",
-        )
+    if await user_can_access_session(db, user=current_user, session_id=session_id):
+        return session_id
 
-    return session_id
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="No tienes permiso para acceder a esta sesión.",
+    )
 
 
 # ---------------------------------------------------------------------------

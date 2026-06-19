@@ -59,6 +59,9 @@ export const dictionaries = {
       passwordMismatch: "Las contraseñas no coinciden. Asegúrate de escribir exactamente lo mismo en los dos campos.",
       usernameHint: "Solo minúsculas, números, guion (-) o guion bajo (_).",
       passwordHint: "Mínimo 8 caracteres con mayúscula, minúscula, dígito y símbolo.",
+      roleLabel: "Tipo de cuenta",
+      roleStudent: "Soy Alumno",
+      roleTrainer: "Soy Formador",
     },
   },
 
@@ -95,6 +98,8 @@ export const dictionaries = {
     closeUploadModal: "Cerrar",
     projects: {
       sectionTitle: "Proyectos",
+      sharedSectionTitle: "Cursos del formador",
+      ownSectionTitle: "Mis proyectos",
       emptyState: "Crea tu primer proyecto con el botón +.",
       noResults: (query: string) => `Sin resultados para "${query}".`,
       defaultName: (n: number) => `Proyecto ${n}`,
@@ -118,6 +123,8 @@ export const dictionaries = {
         title: "Limpiar sesión",
         description:
           "Se eliminarán todos los datos guardados de este usuario, incluidos todos los proyectos, sus chats y los conocimientos cargados. Esta acción no se puede deshacer.",
+        descriptionFormador:
+          "Se eliminarán todos tus proyectos, chats y documentos. Los alumnos asignados dejarán de ver tus cursos compartidos y su progreso en ellos. Esta acción no se puede deshacer.",
         accept: "Eliminar todo",
         cancel: "Cancelar",
       },
@@ -214,6 +221,7 @@ export const dictionaries = {
     },
     tabs: {
       config: "Configurar curso",
+      students: "Gestión de alumnos",
       progress: "Progreso del alumno",
     },
     chat: {
@@ -239,6 +247,8 @@ export const dictionaries = {
       competencyLoading: "Cargando competencias…",
       noCompetencies:
         "Sube documentos al proyecto para extraer competencias y poder enlazarlas aquí.",
+      competenciesProcessing:
+        "Hay documentos en el proyecto. Si acabas de subirlos, las competencias pueden tardar unos segundos en aparecer.",
       totalWeight: (total: string) => `Peso total: ${total}%`,
       weightWarning: "El peso total debería sumar 100%.",
       save: "Validar y Guardar",
@@ -260,6 +270,25 @@ export const dictionaries = {
       generateQuiz: "Evaluar Unidad",
       generateQuizAriaLabel: (name: string) =>
         `Generar cuestionario adaptativo sobre ${name}`,
+      selectStudent: "Alumno a visualizar",
+      noStudentsAssigned: "Asigna alumnos en «Gestión de alumnos» para ver su progreso.",
+      noTrainer: "No tienes formador asignado. Pide que te añadan a su lista.",
+    },
+    studentManager: {
+      title: "Gestión de alumnos",
+      availableTitle: "Alumnos disponibles",
+      mineTitle: "Mis alumnos",
+      emptyAvailable: "No hay alumnos disponibles para asignar.",
+      emptyMine: "Aún no tienes alumnos asignados.",
+      assign: "Asignar",
+      remove: "Quitar",
+      loading: "Cargando listas…",
+      error: "No se pudieron cargar los alumnos.",
+      assignError: "No se pudo asignar el alumno.",
+      removeError: "No se pudo desvincular el alumno.",
+      searchPlaceholder: "Buscar alumno por nombre…",
+      searchAriaLabel: "Filtrar alumnos disponibles por nombre de usuario",
+      noSearchResults: "Ningún alumno coincide con la búsqueda.",
     },
     detailModal: {
       generateQuiz: "Generar Cuestionario",

@@ -74,8 +74,12 @@ function resolveDocumentsFromTask(
 }
 
 export default function UploadManager() {
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
   const { effectiveSessionId, addDocumentsToCurrent } = useProjects();
+  const isFormador = user?.role === "formador";
+  const visibleTabs = isFormador
+    ? TABS
+    : TABS.filter((tab) => tab.id !== "nube");
 
   const [activeTab, setActiveTab] = useState<TabId>("manual");
   const [file, setFile] = useState<File | null>(null);
@@ -86,6 +90,12 @@ export default function UploadManager() {
   const [nubeLoading, setNubeLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!isFormador && activeTab === "nube") {
+      setActiveTab("manual");
+    }
+  }, [isFormador, activeTab]);
 
   const clearTask = useCallback(() => {
     if (intervalRef.current) {
@@ -101,7 +111,7 @@ export default function UploadManager() {
     if (!taskId) return;
     const poll = async () => {
       try {
-        const status = await getTaskStatus(taskId);
+        const status = await getTaskStatus(taskId, accessToken);
         setTaskStatus(status);
         if (status.status === "SUCCESS" || status.status === "FAILURE") {
           if (intervalRef.current) {
@@ -121,7 +131,7 @@ export default function UploadManager() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [taskId]);
+  }, [taskId, accessToken]);
 
   useEffect(() => {
     if (!pendingTask || !taskStatus) return;
@@ -205,7 +215,7 @@ export default function UploadManager() {
   return (
     <div className="space-y-4">
       <div className="flex rounded-lg bg-gray-100 dark:bg-gray-800 p-1">
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"

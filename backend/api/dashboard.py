@@ -28,20 +28,22 @@ Diseño:
 """
 from __future__ import annotations
 
-import json
-import os
-import re
-from urllib.parse import unquote
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import get_validated_session
 from database import get_db
+from document_keys import (
+    build_document_filenames,
+    competency_document_match,
+    normalize_competency_document_id,
+    parse_project_document_keys_header,
+)
 from document_registry import load_document_registry
 from logger import get_logger
 from models import Competency, Subcompetency, UserCompetencyProgress
@@ -55,102 +57,6 @@ from schemas import (
 logger = get_logger("api.dashboard")
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
-
-
-_YT_URL_RE = re.compile(r"(?:youtube\.com|youtu\.be)", re.IGNORECASE)
-_YT_ID_RE = re.compile(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})")
-
-
-def _extract_video_id_from_url(url: str) -> Optional[str]:
-    """Extrae el video_id de 11 caracteres de una URL de YouTube."""
-    m = _YT_ID_RE.search(url)
-    return m.group(1) if m else None
-
-
-def _basename_key(key: str) -> str:
-    """Clave canónica para un documento (basename del fichero o video_id)."""
-    k = (key or "").strip()
-    if not k:
-        return ""
-    if _YT_URL_RE.search(k):
-        # Para URLs de YouTube devolver el video_id (no os.path.basename que
-        # daría 'watch?v=…' en YouTube.com o solo el ID en youtu.be)
-        vid = _extract_video_id_from_url(k)
-        return vid if vid else k
-    return os.path.basename(k)
-
-
-def _parse_project_document_keys_header(raw: Optional[str]) -> List[str]:
-    """JSON array de claves de documento enviado por el cliente.
-
-    El cliente codifica el valor con ``encodeURIComponent`` para evitar
-    caracteres fuera de ISO-8859-1 en headers HTTP; aquí lo decodificamos.
-    """
-    if not raw or not str(raw).strip():
-        return []
-    try:
-        data = json.loads(unquote(raw))
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(data, list):
-        return []
-    out: List[str] = []
-    for item in data:
-        if isinstance(item, str) and item.strip():
-            out.append(item.strip())
-    return out
-
-
-def _build_document_filenames(
-    registry: Dict[str, Any],
-    header_keys: List[str],
-) -> Tuple[List[str], Dict[str, str]]:
-    """Construye la lista de claves canónicas de documentos y su mapa de nombres legibles.
-
-    Para vídeos de YouTube: clave = video_id (11 chars), nombre = título del vídeo.
-    Para PDFs u otros: clave = basename, nombre = basename.
-
-    El header es un fallback para PDFs cuyo registry esté en otro servidor/volumen.
-
-    Returns:
-        document_filenames: lista de claves canónicas en orden de registro.
-        display_names: mapping clave → nombre legible para el frontend.
-    """
-    seen: set[str] = set()
-    filenames: List[str] = []
-    display_names: Dict[str, str] = {}
-
-    # 1. Entradas del registry (fuente de verdad para la sesión)
-    for reg_key, reg_value in registry.items():
-        card = reg_value if isinstance(reg_value, dict) else {}
-        if card.get("type") == "video":
-            # Clave canónica: video_id almacenado explícitamente o extraído de la URL
-            video_id = card.get("video_id") or _extract_video_id_from_url(reg_key)
-            if not video_id:
-                continue
-            lookup_key = video_id
-            display = card.get("title") or reg_key
-        else:
-            lookup_key = _basename_key(reg_key)
-            display = lookup_key
-
-        if not lookup_key or lookup_key in seen:
-            continue
-        seen.add(lookup_key)
-        filenames.append(lookup_key)
-        display_names[lookup_key] = display
-
-    # 2. Claves del header como fallback (cuando el registry está vacío/desfasado)
-    for key in header_keys:
-        # El frontend envía video_id (11 chars) para YouTube
-        lookup_key = _basename_key(key) if _YT_URL_RE.search(key) else key.strip()
-        if not lookup_key or lookup_key in seen:
-            continue
-        seen.add(lookup_key)
-        filenames.append(lookup_key)
-        display_names[lookup_key] = key.strip()
-
-    return filenames, display_names
 
 
 @router.get(
@@ -180,8 +86,8 @@ async def get_dashboard_competencies(
     para las competencias todavía sin evaluar.
     """
     registry = load_document_registry(session_id)
-    header_keys = _parse_project_document_keys_header(x_project_document_keys)
-    document_filenames, display_names = _build_document_filenames(registry, header_keys)
+    header_keys = parse_project_document_keys_header(x_project_document_keys)
+    document_filenames, display_names = build_document_filenames(registry, header_keys)
 
     if not document_filenames:
         return DashboardCompetencyResponse(documents=[])
@@ -196,13 +102,9 @@ async def get_dashboard_competencies(
         .subquery()
     )
 
-    doc_match = []
-    for fn in document_filenames:
-        doc_match.append(Competency.document_id == fn)
-        # Compatibilidad con datos anteriores donde se almacenaba la URL completa
-        # en lugar del video_id — el video_id de 11 chars aparece en la URL.
-        doc_match.append(Competency.document_id.like(f"%/{fn}"))
-        doc_match.append(Competency.document_id.like(f"%?v={fn}%"))
+    doc_match = competency_document_match(document_filenames)
+    if doc_match is None:
+        return DashboardCompetencyResponse(documents=[])
 
     stmt = (
         select(
@@ -216,7 +118,7 @@ async def get_dashboard_competencies(
             progress_subq,
             progress_subq.c.subcompetency_id == Subcompetency.id,
         )
-        .where(or_(*doc_match))
+        .where(doc_match)
         .group_by(Competency.document_id, Competency.id, Competency.name)
         .order_by(Competency.document_id, Competency.name)
     )
@@ -234,12 +136,7 @@ async def get_dashboard_competencies(
 
     by_document: dict[str, list[DashboardCompetencyItem]] = defaultdict(list)
     for row in rows:
-        raw_id = row.document_id or ""
-        # Normalizar: si es URL de YouTube (datos antiguos), extraer video_id
-        if _YT_URL_RE.search(raw_id):
-            doc_key = _extract_video_id_from_url(raw_id) or _basename_key(raw_id)
-        else:
-            doc_key = _basename_key(raw_id)
+        doc_key = normalize_competency_document_id(row.document_id or "")
         if not doc_key:
             continue
         by_document[doc_key].append(

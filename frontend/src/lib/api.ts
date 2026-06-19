@@ -1,29 +1,18 @@
-/**
- * Cliente API para el backend FastAPI del Chatbot RAG Educativo.
- * Usa fetch nativo. Todas las funciones incluyen X-Session-Id cuando aplica.
- */
+import { BACKEND_URL } from "@/lib/config";
+import {
+  fetchJson,
+  normalizeSessionId,
+  parseErrorResponse,
+  sessionHeaders,
+} from "@/lib/http";
 
-/** URL base del backend FastAPI. Override con NEXT_PUBLIC_BACKEND_URL. */
-export const BACKEND_URL =
-  (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_BACKEND_URL) ||
-  "http://localhost:8000";
-
-// ---------------------------------------------------------------------------
-// Tipos de respuesta (alineados con backend/schemas.py)
-// ---------------------------------------------------------------------------
+export { BACKEND_URL };
 
 export interface ChatResponse {
   answer: string;
   sources: string[];
   learning_mode: boolean;
   learning_topic: string | null;
-  /**
-   * El backend lo activa cuando, dentro de un flujo de modo aprendizaje, ha
-   * persistido una nueva `LearningEvidence` y recalculado el progreso de la
-   * subcompetencia. El frontend usa este flag como señal para refrescar el
-   * dashboard de competencias. Se marca opcional para permanecer compatible
-   * con respuestas antiguas que no incluían el campo.
-   */
   progress_updated?: boolean;
 }
 
@@ -37,21 +26,10 @@ export interface HistoryResponse {
   messages: ChatMessageSchema[];
 }
 
-export interface UserFactItem {
-  tipo: string;
-  valor: string;
-  confianza: number;
-}
-
-export interface UserFactsResponse {
-  facts: UserFactItem[];
-}
-
 export interface ClearSessionResponse {
   message: string;
 }
 
-/** Discovery Hub — resúmenes y exámenes persistidos por sesión. */
 export interface DiscoveryItem {
   id: number;
   user_prompt: string;
@@ -62,10 +40,6 @@ export interface DiscoveryItem {
 export interface DiscoveryStats {
   summaries: number;
   exams: number;
-}
-
-export interface DeletedCountResponse {
-  deleted: number;
 }
 
 export interface TaskEnqueuedResponse {
@@ -82,86 +56,32 @@ export interface TaskStatusResponse {
   error: string | null;
 }
 
-export interface LoadCloudResponse {
-  success: boolean;
-  filenames: string[];
-  document_count: number;
-  message: string;
-}
-
-// ---------------------------------------------------------------------------
-// Tipos de Dashboard / Evaluación
-// (Espejo TypeScript de los esquemas Pydantic en backend/schemas.py)
-// ---------------------------------------------------------------------------
-
-/**
- * Espejo de `DashboardCompetencyItem`.
- * Puntuación 0.0–1.0: promedio de subcompetencias en modo aprendizaje.
- * El UI la muestra como escala 0–5.
- */
 export interface DashboardCompetencyItem {
   name: string;
   score: number;
 }
 
-/** Espejo de `DashboardDocumentCompetencies`. */
 export interface DashboardDocumentCompetencies {
   document_id: string;
-  /** Nombre legible (título del vídeo, nombre del PDF). Presente si el backend lo conoce. */
   display_name?: string | null;
   competencies: DashboardCompetencyItem[];
 }
 
-/**
- * Espejo de `DashboardCompetencyResponse`.
- * Respuesta de `GET /dashboard/competencies`: un bloque por documento cargado.
- */
 export interface DashboardCompetencyResponse {
   documents: DashboardDocumentCompetencies[];
 }
 
-/**
- * Espejo de `EvaluateLearningRequest`.
- * Body que se envía a `POST /evaluate` para que el backend evalúe la
- * respuesta del estudiante con el LLM, registre la evidencia y actualice
- * la puntuación agregada de la subcompetencia correspondiente.
- */
-export interface EvaluateLearningRequest {
-  session_id: string;
-  learning_outcome_id: number;
-  answer: string;
-}
-
-/**
- * Espejo de `EvaluateLearningResponse`.
- * Devuelve la puntuación asignada a la respuesta concreta, el feedback
- * generado por el evaluador y la puntuación recalculada de la subcompetencia
- * tras esta evaluación.
- */
-export interface EvaluateLearningResponse {
-  score: number;
-  feedback: string;
-  updated_subcompetency_score: number;
-}
-
-// ---------------------------------------------------------------------------
-// Tipos del Módulo Formador (espejo de backend/schemas.py)
-// ---------------------------------------------------------------------------
-
-/** Espejo de `GeneratedLearningUnit` — pesos en % (0-100). */
 export interface GeneratedLearningUnit {
   name: string;
   definition: string;
   weight: number;
 }
 
-/** Espejo de `GeneratedTheme`. */
 export interface GeneratedTheme {
   name: string;
   learning_units: GeneratedLearningUnit[];
 }
 
-/** Espejo de `GeneratedItinerary` — respuesta de POST /trainer/generate-itinerary. */
 export interface GeneratedItinerary {
   title: string;
   total_weeks: number;
@@ -169,17 +89,14 @@ export interface GeneratedItinerary {
   themes: GeneratedTheme[];
 }
 
-/** Unidad a guardar — peso como fracción (0.0-1.0). */
 export interface LearningUnitCreate {
   name: string;
   definition: string;
   weight: number;
   order_index?: number;
-  /** ID del learning outcome enlazado (opcional). */
   learning_outcome_id?: number | null;
 }
 
-/** Opción de competencia para enlazar una celda del cuadrante. */
 export interface TrainerLearningOutcomeOption {
   id: number;
   description: string;
@@ -194,7 +111,6 @@ export interface ThemeCreate {
   learning_units: LearningUnitCreate[];
 }
 
-/** Espejo de `CourseItineraryCreate` — body de POST /trainer/save-itinerary. */
 export interface CourseItineraryCreate {
   title: string;
   total_weeks: number;
@@ -202,7 +118,6 @@ export interface CourseItineraryCreate {
   themes: ThemeCreate[];
 }
 
-/** Espejo de `SaveItineraryResponse`. */
 export interface SaveItineraryResponse {
   itinerary_id: number;
   theme_count: number;
@@ -210,7 +125,6 @@ export interface SaveItineraryResponse {
   message: string;
 }
 
-/** Espejo de `QuadrantUnit` — celda del cuadrante de progreso. */
 export interface QuadrantUnit {
   unit_id: number;
   name: string;
@@ -221,14 +135,12 @@ export interface QuadrantUnit {
   color_code: string;
 }
 
-/** Espejo de `QuadrantTheme`. */
 export interface QuadrantTheme {
   theme_id: number;
   name: string;
   units: QuadrantUnit[];
 }
 
-/** Espejo de `QuadrantResponse` — GET /trainer/progress/quadrant. */
 export interface QuadrantResponse {
   itinerary_id: number;
   title: string;
@@ -238,7 +150,6 @@ export interface QuadrantResponse {
   overall_score: number;
 }
 
-/** Espejo de `StudentActivityLogRead`. */
 export interface StudentActivityLogRead {
   id: number;
   session_id: string;
@@ -249,7 +160,6 @@ export interface StudentActivityLogRead {
   timestamp: string;
 }
 
-/** Espejo de `UnitDetailsResponse` — GET /trainer/progress/unit-details. */
 export interface UnitDetailsResponse {
   unit_id: number;
   unit_name: string;
@@ -277,168 +187,50 @@ export interface ChatOptions {
   learning_unit_id?: number;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function sessionHeaders(sessionId: string, accessToken?: string | null): HeadersInit {
-  const h: Record<string, string> = {
-    "X-Session-Id": sessionId.trim().toLowerCase().replace(/\s+/g, "_"),
-  };
-  if (accessToken) h["Authorization"] = `Bearer ${accessToken}`;
-  return h;
-}
-
-async function parseErrorResponse(res: Response): Promise<string> {
-  const text = await res.text();
-  let detail: string;
-  try {
-    const json = JSON.parse(text) as { detail?: string | Array<{ msg?: string }> };
-    if (typeof json.detail === "string") {
-      detail = json.detail;
-    } else if (Array.isArray(json.detail)) {
-      detail = json.detail.map((d) => (d && d.msg) || String(d)).join("; ");
-    } else {
-      detail = text || res.statusText || `Error ${res.status}`;
-    }
-  } catch {
-    detail = text || res.statusText || `Error ${res.status}`;
-  }
-  return detail;
-}
-
-async function fetchJson<T>(
-  url: string,
-  options: RequestInit & { sessionId?: string; accessToken?: string | null } = {}
-): Promise<T> {
-  const { sessionId, accessToken, ...init } = options;
-  const headers = new Headers(init.headers as Headers);
-  if (sessionId !== undefined) {
-    headers.set("X-Session-Id", sessionId.trim().toLowerCase().replace(/\s+/g, "_"));
-  }
-  if (accessToken) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-  const res = await fetch(url, { ...init, headers });
-  if (!res.ok) {
-    const message = await parseErrorResponse(res);
-    throw new Error(message);
-  }
-  if (res.status === 204) {
-    return undefined as T;
-  }
-  return res.json() as Promise<T>;
-}
-
-// ---------------------------------------------------------------------------
-// Endpoints
-// ---------------------------------------------------------------------------
-
-/**
- * POST /chat — Envía un mensaje y devuelve la respuesta del asistente.
- */
 export async function chat(
   message: string,
   sessionId: string,
   options: ChatOptions = {},
   accessToken?: string | null,
 ): Promise<ChatResponse> {
-  const body = {
-    message: message.trim(),
-    session_id: sessionId.trim().toLowerCase().replace(/\s+/g, "_"),
-    temperature: options.temperature ?? 0.7,
-    max_tokens: options.max_tokens ?? 65535,
-    learning_mode: options.learning_mode ?? false,
-    learning_topic: options.learning_topic ?? null,
-    last_learning_content: options.last_learning_content ?? null,
-    learning_unit_id: options.learning_unit_id ?? null,
-  };
-  try {
-    return await fetchJson<ChatResponse>(`${BACKEND_URL}/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      sessionId,
-      accessToken,
-    });
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
-  }
+  return fetchJson<ChatResponse>(`${BACKEND_URL}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: message.trim(),
+      session_id: normalizeSessionId(sessionId),
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.max_tokens ?? 65535,
+      learning_mode: options.learning_mode ?? false,
+      learning_topic: options.learning_topic ?? null,
+      last_learning_content: options.last_learning_content ?? null,
+      learning_unit_id: options.learning_unit_id ?? null,
+    }),
+    sessionId,
+    accessToken,
+  });
 }
 
-/**
- * GET /history — Obtiene el historial de mensajes de la sesión.
- */
-export async function getHistory(sessionId: string, accessToken?: string | null): Promise<HistoryResponse> {
-  try {
-    return await fetchJson<HistoryResponse>(`${BACKEND_URL}/history`, {
-      method: "GET",
-      sessionId,
-      accessToken,
-    });
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
-  }
+export async function getHistory(
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<HistoryResponse> {
+  return fetchJson<HistoryResponse>(`${BACKEND_URL}/history`, {
+    method: "GET",
+    sessionId,
+    accessToken,
+  });
 }
 
-/**
- * DELETE /history — Borra el historial de chat de la sesión.
- */
-export async function deleteHistory(sessionId: string, accessToken?: string | null): Promise<DeletedCountResponse> {
-  try {
-    return await fetchJson<DeletedCountResponse>(`${BACKEND_URL}/history`, {
-      method: "DELETE",
-      sessionId,
-      accessToken,
-    });
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
-  }
-}
-
-/**
- * GET /user_facts — Obtiene los hechos almacenados sobre el usuario.
- */
-export async function getUserFacts(sessionId: string, accessToken?: string | null): Promise<UserFactsResponse> {
-  try {
-    return await fetchJson<UserFactsResponse>(`${BACKEND_URL}/user_facts`, {
-      method: "GET",
-      sessionId,
-      accessToken,
-    });
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
-  }
-}
-
-/**
- * DELETE /user_facts — Borra todos los hechos del usuario.
- */
-export async function deleteUserFacts(sessionId: string, accessToken?: string | null): Promise<DeletedCountResponse> {
-  try {
-    return await fetchJson<DeletedCountResponse>(`${BACKEND_URL}/user_facts`, {
-      method: "DELETE",
-      sessionId,
-      accessToken,
-    });
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
-  }
-}
-
-/**
- * POST /session/clear — Limpia historial, documentos y vector store de la sesión.
- */
-export async function clearSession(sessionId: string, accessToken?: string | null): Promise<ClearSessionResponse> {
-  try {
-    return await fetchJson<ClearSessionResponse>(`${BACKEND_URL}/session/clear`, {
-      method: "POST",
-      sessionId,
-      accessToken,
-    });
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
-  }
+export async function clearSession(
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<ClearSessionResponse> {
+  return fetchJson<ClearSessionResponse>(`${BACKEND_URL}/session/clear`, {
+    method: "POST",
+    sessionId,
+    accessToken,
+  });
 }
 
 /**
@@ -497,6 +289,7 @@ export async function createPodcastAudio(
     method: "POST",
     headers,
     body,
+    credentials: "include",
     signal: options?.signal,
   });
   if (!res.ok) {
@@ -506,160 +299,97 @@ export async function createPodcastAudio(
   return res.blob();
 }
 
-/**
- * POST /upload — Sube un PDF (encola tarea). Usar getTaskStatus(task_id) para el progreso.
- */
-export async function uploadPdf(file: File, sessionId: string, accessToken?: string | null): Promise<TaskEnqueuedResponse> {
+export async function uploadPdf(
+  file: File,
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<TaskEnqueuedResponse> {
   if (!file.name.toLowerCase().endsWith(".pdf")) {
     throw new Error("Solo se aceptan archivos PDF");
   }
   const form = new FormData();
   form.append("file", file);
-  try {
-    const res = await fetch(`${BACKEND_URL}/upload`, {
-      method: "POST",
-      headers: sessionHeaders(sessionId, accessToken),
-      body: form,
-    });
-    if (!res.ok) {
-      const message = await parseErrorResponse(res);
-      throw new Error(message);
-    }
-    return res.json() as Promise<TaskEnqueuedResponse>;
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
+  const res = await fetch(`${BACKEND_URL}/upload`, {
+    method: "POST",
+    headers: sessionHeaders(sessionId, accessToken),
+    body: form,
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorResponse(res));
   }
+  return res.json() as Promise<TaskEnqueuedResponse>;
 }
 
-/**
- * POST /upload/load_cloud — Carga todos los PDFs del bucket para la sesión.
- */
-export async function loadCloudPdfs(sessionId: string, accessToken?: string | null): Promise<TaskEnqueuedResponse> {
-  try {
-    return await fetchJson<TaskEnqueuedResponse>(`${BACKEND_URL}/upload/load_cloud`, {
-      method: "POST",
-      sessionId,
-      accessToken,
-    });
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
-  }
+export async function loadCloudPdfs(
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<TaskEnqueuedResponse> {
+  return fetchJson<TaskEnqueuedResponse>(`${BACKEND_URL}/upload/load_cloud`, {
+    method: "POST",
+    sessionId,
+    accessToken,
+  });
 }
 
-/**
- * POST /process_video — Encola el procesamiento de un video de YouTube.
- * Usar getTaskStatus(task_id) para el progreso.
- */
 export async function processVideo(
   url: string,
   sessionId: string,
   accessToken?: string | null,
 ): Promise<TaskEnqueuedResponse> {
-  try {
-    return await fetchJson<TaskEnqueuedResponse>(`${BACKEND_URL}/process_video`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: url.trim(), session_id: sessionId.trim().toLowerCase().replace(/\s+/g, "_") }),
-      sessionId,
-      accessToken,
-    });
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
-  }
+  return fetchJson<TaskEnqueuedResponse>(`${BACKEND_URL}/process_video`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: url.trim(), session_id: normalizeSessionId(sessionId) }),
+    sessionId,
+    accessToken,
+  });
 }
 
-/**
- * GET /status/{task_id} — Consulta el estado de una tarea (upload o process_video).
- */
-export async function getTaskStatus(taskId: string): Promise<TaskStatusResponse> {
-  try {
-    const res = await fetch(`${BACKEND_URL}/status/${encodeURIComponent(taskId)}`);
-    if (!res.ok) {
-      const message = await parseErrorResponse(res);
-      throw new Error(message);
-    }
-    return res.json() as Promise<TaskStatusResponse>;
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
-  }
+export async function getTaskStatus(
+  taskId: string,
+  accessToken?: string | null,
+): Promise<TaskStatusResponse> {
+  return fetchJson<TaskStatusResponse>(
+    `${BACKEND_URL}/status/${encodeURIComponent(taskId)}`,
+    { method: "GET", accessToken },
+  );
 }
 
-/**
- * GET /dashboard/competencies — Agrega opcionalmente los nombres de documentos del
- * proyecto (header `X-Project-Document-Keys`) para no depender solo del registro en disco.
- */
 export async function getDashboardCompetencies(
   sessionId: string,
-  /** Claves de búsqueda de documentos (docKey, no el nombre de display). */
   projectDocumentKeys?: readonly string[],
   accessToken?: string | null,
 ): Promise<DashboardCompetencyResponse> {
-  try {
-    const headers: Record<string, string> = {};
-    if (projectDocumentKeys?.length) {
-      // encodeURIComponent garantiza que el valor sea ASCII puro (los títulos
-      // de vídeos de YouTube pueden contener caracteres fuera de ISO-8859-1
-      // que el constructor Headers del navegador rechaza con TypeError).
-      headers["X-Project-Document-Keys"] = encodeURIComponent(
-        JSON.stringify([...projectDocumentKeys]),
-      );
-    }
-    return await fetchJson<DashboardCompetencyResponse>(
-      `${BACKEND_URL}/dashboard/competencies`,
-      {
-        method: "GET",
-        sessionId,
-        headers,
-        accessToken,
-      },
+  const headers: Record<string, string> = {};
+  if (projectDocumentKeys?.length) {
+    headers["X-Project-Document-Keys"] = encodeURIComponent(
+      JSON.stringify([...projectDocumentKeys]),
     );
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
   }
+  return fetchJson<DashboardCompetencyResponse>(`${BACKEND_URL}/dashboard/competencies`, {
+    method: "GET",
+    sessionId,
+    headers,
+    accessToken,
+  });
 }
 
-/**
- * POST /evaluate — Envía la respuesta de un estudiante para que el backend
- * la evalúe con el LLM, registre la evidencia y actualice el progreso de la
- * subcompetencia. Incluye `X-Session-Id` además del `session_id` en el body
- * (el backend lo necesita para indexar la evidencia y el progreso).
- *
- * Errores: 400 (session_id vacío), 404 (`learning_outcome_id` no existe),
- * 502 (LLM no disponible) y 500 (errores de BD/inesperados) se propagan
- * como `Error` con el `detail` del backend.
- */
-export async function submitEvaluation(
-  data: EvaluateLearningRequest,
-  sessionId: string,
-  accessToken?: string | null,
-): Promise<EvaluateLearningResponse> {
-  try {
-    return await fetchJson<EvaluateLearningResponse>(`${BACKEND_URL}/evaluate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-      sessionId,
-      accessToken,
-    });
-  } catch (e) {
-    throw e instanceof Error ? e : new Error(String(e));
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Módulo Formador
-// ---------------------------------------------------------------------------
-
-/**
- * GET /trainer/learning-outcomes — Competencias enlazables a celdas del cuadrante.
- */
+// Formador y alumno
 export async function getTrainerLearningOutcomes(
   sessionId: string,
+  projectDocumentKeys?: readonly string[],
   accessToken?: string | null,
 ): Promise<TrainerLearningOutcomeOption[]> {
+  const headers: Record<string, string> = {};
+  if (projectDocumentKeys?.length) {
+    headers["X-Project-Document-Keys"] = encodeURIComponent(
+      JSON.stringify([...projectDocumentKeys]),
+    );
+  }
   return fetchJson<TrainerLearningOutcomeOption[]>(
     `${BACKEND_URL}/trainer/learning-outcomes`,
-    { method: "GET", sessionId, accessToken },
+    { method: "GET", sessionId, headers, accessToken },
   );
 }
 
@@ -697,31 +427,132 @@ export async function saveItinerary(
   });
 }
 
-/**
- * GET /trainer/progress/quadrant/{session_id} — Matriz de progreso del alumno.
- */
 export async function getProgressQuadrant(
-  studentSessionId: string,
+  studentUsername: string,
   sessionId: string,
   accessToken?: string | null,
 ): Promise<QuadrantResponse> {
   return fetchJson<QuadrantResponse>(
-    `${BACKEND_URL}/trainer/progress/quadrant/${encodeURIComponent(studentSessionId)}`,
+    `${BACKEND_URL}/trainer/progress/quadrant/${encodeURIComponent(studentUsername)}`,
     { method: "GET", sessionId, accessToken },
   );
 }
 
+export interface UserOut {
+  id: number;
+  username: string;
+  email?: string | null;
+  role: "formador" | "alumno";
+  created_at: string;
+}
+
+export interface StudentListResponse {
+  students: UserOut[];
+}
+
+export interface SharedProjectDocument {
+  name: string;
+  doc_key: string;
+  source: string;
+}
+
+export interface SharedProjectRead {
+  id: number;
+  name: string;
+  session_id: string;
+  trainer_username: string;
+  documents: SharedProjectDocument[];
+}
+
+export interface SharedProjectsResponse {
+  projects: SharedProjectRead[];
+}
+
+/** GET /student/projects/shared — Cursos del formador asignados al alumno. */
+export async function getSharedProjects(
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<SharedProjectsResponse> {
+  return fetchJson<SharedProjectsResponse>(`${BACKEND_URL}/student/projects/shared`, {
+    method: "GET",
+    sessionId,
+    accessToken,
+  });
+}
+
 /**
- * GET /trainer/progress/unit-details/{session_id}/{unit_id} — Drill-down de una celda.
+ * GET /student/progress/quadrant/me — Cuadrante del alumno en el curso activo (header X-Session-Id).
  */
+export async function getMyProgressQuadrant(
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<QuadrantResponse> {
+  return fetchJson<QuadrantResponse>(`${BACKEND_URL}/student/progress/quadrant/me`, {
+    method: "GET",
+    sessionId,
+    accessToken,
+  });
+}
+
+/** GET /trainer/students/available */
+export async function getAvailableStudents(
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<StudentListResponse> {
+  return fetchJson<StudentListResponse>(`${BACKEND_URL}/trainer/students/available`, {
+    method: "GET",
+    sessionId,
+    accessToken,
+  });
+}
+
+/** GET /trainer/students/mine */
+export async function getMyStudents(
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<StudentListResponse> {
+  return fetchJson<StudentListResponse>(`${BACKEND_URL}/trainer/students/mine`, {
+    method: "GET",
+    sessionId,
+    accessToken,
+  });
+}
+
+/** POST /trainer/students/assign */
+export async function assignStudent(
+  body: { student_id?: number; student_username?: string },
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<UserOut> {
+  return fetchJson<UserOut>(`${BACKEND_URL}/trainer/students/assign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    sessionId,
+    accessToken,
+  });
+}
+
+/** DELETE /trainer/students/remove/{username} */
+export async function removeStudent(
+  studentUsername: string,
+  sessionId: string,
+  accessToken?: string | null,
+): Promise<void> {
+  await fetchJson<void>(
+    `${BACKEND_URL}/trainer/students/remove/${encodeURIComponent(studentUsername)}`,
+    { method: "DELETE", sessionId, accessToken },
+  );
+}
+
 export async function getUnitDetails(
-  studentSessionId: string,
+  studentUsername: string,
   unitId: number,
   sessionId: string,
   accessToken?: string | null,
 ): Promise<UnitDetailsResponse> {
   return fetchJson<UnitDetailsResponse>(
-    `${BACKEND_URL}/trainer/progress/unit-details/${encodeURIComponent(studentSessionId)}/${unitId}`,
+    `${BACKEND_URL}/trainer/progress/unit-details/${encodeURIComponent(studentUsername)}/${unitId}`,
     { method: "GET", sessionId, accessToken },
   );
 }

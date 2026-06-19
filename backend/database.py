@@ -81,38 +81,58 @@ def _apply_schema_patches_sync(connection) -> None:
         return
 
     columns = {col["name"] for col in insp.get_columns("learning_units")}
-    if "learning_outcome_id" in columns:
+    if "learning_outcome_id" not in columns:
+        dialect = connection.dialect.name
+        logger.info(
+            "Aplicando parche de esquema: añadir learning_units.learning_outcome_id (%s)",
+            dialect,
+        )
+        if dialect == "postgresql":
+            connection.execute(
+                text(
+                    "ALTER TABLE learning_units "
+                    "ADD COLUMN IF NOT EXISTS learning_outcome_id INTEGER "
+                    "REFERENCES learning_outcomes(id) ON DELETE SET NULL"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_learning_units_outcome "
+                    "ON learning_units (learning_outcome_id)"
+                )
+            )
+        else:
+            connection.execute(
+                text(
+                    "ALTER TABLE learning_units "
+                    "ADD COLUMN learning_outcome_id INTEGER"
+                )
+            )
+
+    if not insp.has_table("users"):
         return
 
-    dialect = connection.dialect.name
-    logger.info(
-        "Aplicando parche de esquema: añadir learning_units.learning_outcome_id (%s)",
-        dialect,
-    )
-    if dialect == "postgresql":
-        # IF NOT EXISTS evita DuplicateColumnError con varios workers de Uvicorn
-        # arrancando lifespan en paralelo.
-        connection.execute(
-            text(
-                "ALTER TABLE learning_units "
-                "ADD COLUMN IF NOT EXISTS learning_outcome_id INTEGER "
-                "REFERENCES learning_outcomes(id) ON DELETE SET NULL"
-            )
+    user_columns = {col["name"] for col in insp.get_columns("users")}
+    if "role" not in user_columns:
+        dialect = connection.dialect.name
+        logger.info(
+            "Aplicando parche de esquema: añadir users.role (%s)",
+            dialect,
         )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS ix_learning_units_outcome "
-                "ON learning_units (learning_outcome_id)"
+        if dialect == "postgresql":
+            connection.execute(
+                text(
+                    "ALTER TABLE users "
+                    "ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'alumno'"
+                )
             )
-        )
-    else:
-        # SQLite y otros: columna nullable; el FK se valida a nivel ORM.
-        connection.execute(
-            text(
-                "ALTER TABLE learning_units "
-                "ADD COLUMN learning_outcome_id INTEGER"
+        else:
+            connection.execute(
+                text(
+                    "ALTER TABLE users "
+                    "ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'alumno'"
+                )
             )
-        )
 
 
 async def init_db() -> None:

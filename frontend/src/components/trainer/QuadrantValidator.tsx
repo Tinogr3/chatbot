@@ -50,7 +50,13 @@ function toEditable(itinerary: GeneratedItinerary): EditableTheme[] {
  */
 export default function QuadrantValidator({ itinerary, onSaved }: QuadrantValidatorProps) {
   const { accessToken } = useAuth();
-  const { effectiveSessionId } = useProjects();
+  const { effectiveSessionId, currentProject } = useProjects();
+
+  const projectDocumentKeys = useMemo(
+    () => currentProject?.documents.map((d) => d.docKey ?? d.name).filter(Boolean) ?? [],
+    [currentProject?.documents],
+  );
+  const hasProjectDocuments = projectDocumentKeys.length > 0;
 
   const [title, setTitle] = useState("");
   const [weeks, setWeeks] = useState(4);
@@ -65,7 +71,11 @@ export default function QuadrantValidator({ itinerary, onSaved }: QuadrantValida
     if (!effectiveSessionId) return;
     let cancelled = false;
     setOutcomesLoading(true);
-    getTrainerLearningOutcomes(effectiveSessionId, accessToken)
+    getTrainerLearningOutcomes(
+      effectiveSessionId,
+      projectDocumentKeys.length > 0 ? projectDocumentKeys : undefined,
+      accessToken,
+    )
       .then((list) => {
         if (!cancelled) setOutcomes(list);
       })
@@ -78,7 +88,23 @@ export default function QuadrantValidator({ itinerary, onSaved }: QuadrantValida
     return () => {
       cancelled = true;
     };
-  }, [effectiveSessionId, accessToken]);
+  }, [effectiveSessionId, accessToken, projectDocumentKeys]);
+
+  useEffect(() => {
+    if (!effectiveSessionId || !hasProjectDocuments) return;
+    const timer = window.setInterval(() => {
+      getTrainerLearningOutcomes(
+        effectiveSessionId,
+        projectDocumentKeys,
+        accessToken,
+      )
+        .then((list) => {
+          if (list.length > 0) setOutcomes(list);
+        })
+        .catch(() => {});
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [effectiveSessionId, accessToken, hasProjectDocuments, projectDocumentKeys]);
 
   useEffect(() => {
     if (!itinerary) return;
@@ -219,7 +245,9 @@ export default function QuadrantValidator({ itinerary, onSaved }: QuadrantValida
 
       <div className="flex-1 overflow-auto p-3">
         {!outcomesLoading && outcomes.length === 0 && (
-          <p className="mb-3 text-xs text-amber-700 dark:text-amber-400">{t.noCompetencies}</p>
+          <p className="mb-3 text-xs text-amber-700 dark:text-amber-400">
+            {hasProjectDocuments ? t.competenciesProcessing : t.noCompetencies}
+          </p>
         )}
         <table className="w-full border-collapse text-sm">
           <thead>

@@ -34,6 +34,8 @@ Abre `.env` y rellena los valores obligatorios:
 | `POSTGRES_PASSWORD` | Contraseña segura para PostgreSQL |
 | `JWT_SECRET_KEY` | Clave secreta para firmar tokens JWT. Genera una con: `python -c "import secrets; print(secrets.token_hex(64))"` |
 | `ALLOWED_ORIGINS` | URL del frontend separada por comas (por defecto `http://localhost:3000`) |
+| `ENVIRONMENT` | `development` o `production` (afecta cookies seguras) |
+| `COOKIE_SECURE` | `true`/`false`; en producción con HTTPS conviene `true` |
 | `NEXT_PUBLIC_BACKEND_URL` | URL del backend vista desde el navegador (por defecto `http://localhost:8000`) |
 
 > **Nota sobre `NEXT_PUBLIC_BACKEND_URL`:** esta variable se incrusta en el bundle de Next.js en tiempo de compilación. Si el backend está en un servidor remoto, cámbiala en `.env` **antes** de ejecutar `./deploy.sh` o `docker compose build frontend`.

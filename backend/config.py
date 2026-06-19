@@ -14,7 +14,26 @@ load_dotenv()
 
 BUCKET_NAME: str = os.getenv("BUCKET_NAME", "chatbot-rag-documents")
 
-_DEFAULT_ALLOWED_ORIGINS = "http://localhost:3000,http://localhost:8501"
+_DEFAULT_ALLOWED_ORIGINS = "http://localhost:3000"
+
+
+@dataclass(frozen=True)
+class AppSettings:
+    environment: str
+    cookie_secure: bool
+
+
+@lru_cache
+def get_app_settings() -> AppSettings:
+    environment = os.getenv("ENVIRONMENT", "development").lower()
+    raw_secure = os.getenv("COOKIE_SECURE", "").strip().lower()
+    if raw_secure in ("1", "true", "yes"):
+        cookie_secure = True
+    elif raw_secure in ("0", "false", "no"):
+        cookie_secure = False
+    else:
+        cookie_secure = environment == "production"
+    return AppSettings(environment=environment, cookie_secure=cookie_secure)
 
 
 @dataclass(frozen=True)

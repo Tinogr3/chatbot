@@ -1,23 +1,4 @@
-"""
-Endpoint de evaluación de respuestas + helpers reutilizables de persistencia.
-
-POST /evaluate
-    Recibe `EvaluateLearningRequest` y orquesta:
-      1. Carga del `LearningOutcome` por id (con su subcompetencia precargada).
-      2. Evaluación con LLM (`EvaluationService.evaluate_student_answer`).
-      3. Persistencia (vía `record_learning_progress`) de la evidencia y del
-         progreso agregado por subcompetencia.
-      4. Devuelve `EvaluateLearningResponse`.
-
-`record_learning_progress` también se reutiliza desde `api/chat.py` cuando el
-usuario está en modo aprendizaje y el LLM evalúa su respuesta dentro del
-flujo conversacional, manteniendo una única fuente de verdad para la lógica
-de "registrar evidencia + recalcular progreso".
-
-Toda la persistencia usa la sesión inyectada por `get_db`. El generador
-gestiona automáticamente commit/rollback al cerrarse, así que no se llama
-explícitamente a `db.commit()` desde aquí.
-"""
+"""Evaluación de respuestas en modo aprendizaje y persistencia de progreso."""
 from __future__ import annotations
 
 import asyncio

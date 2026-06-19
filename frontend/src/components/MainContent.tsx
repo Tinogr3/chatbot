@@ -1,12 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { GraduationCap, User, Users } from "lucide-react";
+import { GraduationCap, User } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 import { useUser } from "@/context/UserContext";
+import { useProjects } from "@/context/ProjectsContext";
 import MaturityDashboard from "@/components/dashboard/MaturityDashboard";
 import ChatInputBar from "@/components/chat/ChatInputBar";
 import TrainerConfigView from "@/components/trainer/TrainerConfigView";
 import StudentProgressDashboard from "@/components/trainer/StudentProgressDashboard";
+import StudentManager from "@/components/trainer/StudentManager";
 import { dictionaries } from "@/locales";
 import DiscoveryHubSection from "@/components/DiscoveryHubSection";
 
@@ -21,7 +24,7 @@ type MainContentProps = {
   onToggleLearningMode?: () => void;
 };
 
-type TrainerTab = "config" | "progress";
+type TrainerTab = "config" | "students" | "progress";
 
 export default function MainContent({
   onSendMessage,
@@ -31,7 +34,10 @@ export default function MainContent({
   onToggleLearningMode,
 }: MainContentProps) {
   const { username } = useUser();
-  const [isTrainerMode, setIsTrainerMode] = useState(false);
+  const { user } = useAuth();
+  const { isSharedCourseActive } = useProjects();
+  const isFormador = user?.role === "formador";
+
   const [trainerTab, setTrainerTab] = useState<TrainerTab>("config");
   const [progressRefreshKey, setProgressRefreshKey] = useState(0);
 
@@ -44,28 +50,12 @@ export default function MainContent({
             <p className="text-gray-500 dark:text-gray-400 mt-0.5">{t.pageSubtitle}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setIsTrainerMode((prev) => !prev)}
-              aria-pressed={isTrainerMode}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                isTrainerMode
-                  ? "bg-emerald-500 text-white hover:bg-emerald-600"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-              }`}
-            >
-              {isTrainerMode ? (
-                <>
-                  <GraduationCap className="h-4 w-4" aria-hidden="true" />
-                  {tTrainer.modeToggle.toStudent}
-                </>
-              ) : (
-                <>
-                  <Users className="h-4 w-4" aria-hidden="true" />
-                  {tTrainer.modeToggle.toTrainer}
-                </>
-              )}
-            </button>
+            {isFormador && (
+              <span className="hidden items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300 sm:flex">
+                <GraduationCap className="h-3.5 w-3.5" aria-hidden="true" />
+                Formador
+              </span>
+            )}
             <span className="text-sm text-gray-700 dark:text-gray-200 truncate max-w-[160px]">
               {username}
             </span>
@@ -79,12 +69,13 @@ export default function MainContent({
           </div>
         </div>
 
-        {isTrainerMode ? (
+        {isFormador ? (
           <div className="space-y-4">
-            <div className="flex rounded-lg bg-gray-100 dark:bg-gray-800 p-1 max-w-md">
+            <div className="flex rounded-lg bg-gray-100 dark:bg-gray-800 p-1 max-w-2xl">
               {(
                 [
                   { id: "config", label: tTrainer.tabs.config },
+                  { id: "students", label: tTrainer.tabs.students },
                   { id: "progress", label: tTrainer.tabs.progress },
                 ] as const
               ).map((tab) => (
@@ -107,12 +98,18 @@ export default function MainContent({
               <TrainerConfigView
                 onItinerarySaved={() => setProgressRefreshKey((n) => n + 1)}
               />
+            ) : trainerTab === "students" ? (
+              <StudentManager />
             ) : (
-              <StudentProgressDashboard refreshKey={progressRefreshKey} />
+              <StudentProgressDashboard
+                refreshKey={progressRefreshKey}
+                trainerMode
+              />
             )}
           </div>
         ) : (
           <>
+            {isSharedCourseActive && <StudentProgressDashboard />}
             <MaturityDashboard />
             <DiscoveryHubSection />
           </>

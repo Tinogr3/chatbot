@@ -1,15 +1,5 @@
 "use client";
 
-/**
- * UserContext — adaptador de compatibilidad sobre AuthContext.
- *
- * Expone la misma interfaz que antes (sessionId, username, login, logout…)
- * pero ahora el `sessionId` y el `username` provienen del JWT autenticado,
- * no del string libre introducido por el usuario.
- *
- * `login` y `logout` delegan en AuthContext.
- */
-
 import React, {
   createContext,
   useCallback,

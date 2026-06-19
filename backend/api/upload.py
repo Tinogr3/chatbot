@@ -3,7 +3,8 @@ import base64
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-from auth import get_validated_session
+from auth import get_validated_session, require_formador
+from models import User
 from schemas import TaskEnqueuedResponse
 
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -41,6 +42,7 @@ async def upload_pdf(
 @router.post("/load_cloud", response_model=TaskEnqueuedResponse)
 def load_cloud_pdfs(
     session_id: str = Depends(get_validated_session),
+    _formador: User = Depends(require_formador),
 ) -> TaskEnqueuedResponse:
 
     # Validación estricta antes de encolar para que el cliente reciba

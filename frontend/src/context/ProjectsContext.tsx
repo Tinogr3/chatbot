@@ -8,7 +8,9 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { useAuth } from "@/context/AuthContext";
 import { useUser } from "@/context/UserContext";
+import { getSharedProjects } from "@/lib/api";
 import { dictionaries } from "@/locales";
 
 const STORAGE_PREFIX = "cotutor_projects_";
@@ -36,6 +38,11 @@ export type Project = {
   name: string;
   documents: ProjectDocument[];
   createdAt: number;
+  /** Curso compartido por el formador (solo lectura para el alumno). */
+  isShared?: boolean;
+  sharedSessionId?: string;
+  trainerUsername?: string;
+  readOnly?: boolean;
 };
 
 type PersistedState = {
@@ -113,18 +120,20 @@ function persistState(sessionId: string, state: PersistedState): void {
 }
 
 export type ProjectsContextValue = {
+  /** Proyectos personales del usuario. */
   projects: Project[];
+  /** Cursos compartidos por el formador (solo alumnos). */
+  sharedProjects: Project[];
+  /** Lista unificada para el sidebar (compartidos primero). */
+  allProjects: Project[];
   currentProject: Project | null;
   currentProjectId: string | null;
-  /**
-   * Identificador compuesto que se envía al backend como `X-Session-Id`.
-   * Une la sesión del usuario y el id del proyecto activo de modo que cada
-   * proyecto reciba un espacio aislado de chat, registro de documentos y
-   * colección de embeddings en el backend (que ya aísla por session_id).
-   */
   effectiveSessionId: string | null;
+  /** True si el proyecto activo es un curso compartido del formador. */
+  isSharedCourseActive: boolean;
   pendingRenameProjectId: string | null;
   isHydrated: boolean;
+  refreshSharedProjects: () => void;
   createProject: () => void;
   renameProject: (projectId: string, name: string) => void;
   selectProject: (projectId: string) => void;
@@ -144,11 +153,62 @@ const ProjectsContext = createContext<ProjectsContextValue | undefined>(undefine
 
 export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   const { sessionId, isHydrated: userHydrated } = useUser();
+  const { user, accessToken } = useAuth();
   const [state, setState] = useState<PersistedState>(EMPTY_STATE);
+  const [sharedProjects, setSharedProjects] = useState<Project[]>([]);
+  const [sharedRefresh, setSharedRefresh] = useState(0);
   const [pendingRenameProjectId, setPendingRenameProjectId] = useState<string | null>(
     null,
   );
   const [isHydrated, setIsHydrated] = useState(false);
+
+  const refreshSharedProjects = useCallback(() => {
+    setSharedRefresh((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!userHydrated || user?.role !== "alumno" || !sessionId) {
+      setSharedProjects([]);
+      return;
+    }
+    let cancelled = false;
+    getSharedProjects(sessionId, accessToken)
+      .then((res) => {
+        if (cancelled) return;
+        const mapped: Project[] = res.projects.map((p) => ({
+          id: `shared-${p.id}`,
+          name: p.name,
+          documents: p.documents.map((d, i) => ({
+            id: `shared-doc-${p.id}-${i}`,
+            name: d.name,
+            docKey: d.doc_key,
+            source: d.source as DocumentSource,
+            addedAt: Date.now(),
+          })),
+          createdAt: Date.now(),
+          isShared: true,
+          sharedSessionId: p.session_id,
+          trainerUsername: p.trainer_username,
+          readOnly: true,
+        }));
+        setSharedProjects(mapped);
+        if (mapped.length > 0) {
+          setState((prev) => {
+            if (prev.currentProjectId?.startsWith("shared-")) {
+              const stillValid = mapped.some((p) => p.id === prev.currentProjectId);
+              if (stillValid) return prev;
+            }
+            return { ...prev, currentProjectId: mapped[0].id };
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSharedProjects([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userHydrated, user?.role, sessionId, accessToken, sharedRefresh]);
 
   useEffect(() => {
     if (!userHydrated) return;
@@ -205,6 +265,7 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   const renameProject = useCallback((projectId: string, rawName: string) => {
     const trimmed = rawName.trim();
     if (!trimmed) return;
+    if (projectId.startsWith("shared-")) return;
     setState((prev) => ({
       ...prev,
       projects: prev.projects.map((p) =>
@@ -216,12 +277,12 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
   const selectProject = useCallback((projectId: string) => {
     setState((prev) => {
       if (prev.currentProjectId === projectId) return prev;
-      if (!prev.projects.some((p) => p.id === projectId)) return prev;
       return { ...prev, currentProjectId: projectId };
     });
   }, []);
 
   const deleteProject = useCallback((projectId: string) => {
+    if (projectId.startsWith("shared-")) return;
     setState((prev) => {
       const projects = prev.projects.filter((p) => p.id !== projectId);
       const currentProjectId =
@@ -274,24 +335,40 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [sessionId]);
 
+  const allProjects = useMemo(
+    () => [...sharedProjects, ...state.projects],
+    [sharedProjects, state.projects],
+  );
+
   const currentProject = useMemo(
-    () => state.projects.find((p) => p.id === state.currentProjectId) ?? null,
-    [state.projects, state.currentProjectId],
+    () => allProjects.find((p) => p.id === state.currentProjectId) ?? null,
+    [allProjects, state.currentProjectId],
+  );
+
+  const isSharedCourseActive = Boolean(
+    currentProject?.isShared && currentProject.sharedSessionId,
   );
 
   const effectiveSessionId = useMemo<string | null>(() => {
-    if (!sessionId || !state.currentProjectId) return null;
+    if (!sessionId || !state.currentProjectId || !currentProject) return null;
+    if (currentProject.isShared && currentProject.sharedSessionId) {
+      return currentProject.sharedSessionId;
+    }
     return `${sessionId}__${state.currentProjectId}`;
-  }, [sessionId, state.currentProjectId]);
+  }, [sessionId, state.currentProjectId, currentProject]);
 
   const value = useMemo<ProjectsContextValue>(
     () => ({
       projects: state.projects,
+      sharedProjects,
+      allProjects,
       currentProject,
       currentProjectId: state.currentProjectId,
       effectiveSessionId,
+      isSharedCourseActive,
       pendingRenameProjectId,
       isHydrated,
+      refreshSharedProjects,
       createProject,
       renameProject,
       selectProject,
@@ -303,10 +380,14 @@ export function ProjectsProvider({ children }: { children: React.ReactNode }) {
     [
       state.projects,
       state.currentProjectId,
+      sharedProjects,
+      allProjects,
       currentProject,
       effectiveSessionId,
+      isSharedCourseActive,
       pendingRenameProjectId,
       isHydrated,
+      refreshSharedProjects,
       createProject,
       renameProject,
       selectProject,
