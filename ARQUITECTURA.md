@@ -14,7 +14,7 @@ Instrucciones de arranque: **[README.md](README.md)**.
 ## Estructura de carpetas
 
 ```
-chatbot-test/
+cotutor-ia/
 ├── backend/
 │   ├── api/              # Routers por dominio
 │   ├── services/         # Lógica de negocio
